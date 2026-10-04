@@ -52,6 +52,19 @@ Reports run through Apple's `/usr/bin/python3`. Using 3.10+ syntax breaks the
 tool on exactly the old machines that need it. Run `tests/py39-compat.sh` after
 touching any embedded block.
 
+## User-visible text goes in the catalogue
+
+Never write a user-visible string inline. Add a key to `locale/en.msg`, translate
+it in the other catalogues, and print it through `msg`/`msgf`/`msgl` in bash or
+`t()` in the embedded python. Keep the `%s` count identical across languages, and
+run `tests/locale-check.sh`.
+
+Two traps worth knowing. In the embedded python the translate function is named
+`t`, so never use `t` as a loop or comprehension variable — it shadows the
+function and the lookup silently stops happening. And the generated
+`rsvg-convert` shim is a standalone script with no catalogue: its text is
+substituted in at install time, so it has no `msg` to call.
+
 ## Machine-specific values go in the config
 
 `ALL_TOOLS` and `MAJOR_ONLY_CASKS` belong in `config/tools.conf`, not in the

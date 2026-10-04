@@ -1,0 +1,9 @@
+# The repository root carries a Python .gitignore, and its `lib/` rule would
+# silently drop lib/i18n.sh and lib/i18n.py — the message-catalogue loaders.
+# Without them the tool still runs but prints every string as !key!, so this
+# re-include is load-bearing, not cosmetic.
+!lib/
+!lib/**
+
+# Machine-local config belongs in ~/.config/brew-to-macports/, never here.
+config/tools.conf

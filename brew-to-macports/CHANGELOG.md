@@ -24,9 +24,14 @@ First published version, extracted from a complete migration off Homebrew.
   drop installed components.
 - Major-only cask policy: unpin, upgrade, pin again — for apps that ship a
   full-size installer on almost every patch release.
+- Translated output. Message catalogues in `locale/`, read by both the bash and
+  the python halves from the same files, so a string exists once per language.
+  Language comes from `BREW2MP_LANG` or the usual locale variables; English is
+  the base layer, so an untranslated key falls back instead of blanking a line.
+  No gettext and no bash 4 required. Ships English and Russian.
 - Thin agent orchestrator in `skills/brew-to-macports/`.
-- `config/tools.conf.example`, `install.sh`, `tests/py39-compat.sh`,
-  `docs/GOTCHAS.md`, `AGENTS.md`.
+- `config/tools.conf.example`, `install.sh`, `docs/GOTCHAS.md`, `AGENTS.md`,
+  and two tests: `tests/py39-compat.sh` and `tests/locale-check.sh`.
 
 ### Fixed
 
@@ -41,3 +46,5 @@ First published version, extracted from a complete migration off Homebrew.
 - `ALL_TOOLS` and `MAJOR_ONLY_CASKS` were baked into the script; now config.
 - Empty watchlist left stale cached state on screen, printing a week-old verdict
   as current.
+- In the holder report, a comprehension variable was named `t`, shadowing the
+  translate function inside it.

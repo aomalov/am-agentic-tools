@@ -76,14 +76,41 @@ MacPorts archives are checked by **exact** name, not "is there any archive":
 Anything looser gives false confidence. See [docs/GOTCHAS.md](docs/GOTCHAS.md) —
 every entry there is a mistake this tool made once and now guards against.
 
+## Language
+
+Output is translated through message catalogues in `locale/`. The language is
+picked from `BREW2MP_LANG`, falling back to `LC_ALL` / `LC_MESSAGES` / `LANG`,
+then English:
+
+```sh
+BREW2MP_LANG=ru upgrade-vendor-packages --check
+```
+
+English is always loaded first and every other language is layered on top, so a
+key a translation has not covered renders in English rather than as an empty
+line — a partial catalogue is a usable catalogue.
+
+To add a language, copy `locale/en.msg` to `locale/<code>.msg` and translate what
+you want. Nothing else changes: both halves of the tool, bash and the embedded
+python reports, read the same files, so a string exists once per language. Run
+`tests/locale-check.sh` afterwards — it catches keys that do not exist in
+English, keys the code never uses, and the one mistake that actually breaks at
+runtime: a translation whose `%s` count differs from the original.
+
+There is no gettext dependency and no `declare -A`, because `msgfmt` is not on a
+stock macOS and the system bash is 3.2.
+
 ## Layout
 
 ```
 bin/upgrade-vendor-packages.sh   the tool
+lib/i18n.sh, lib/i18n.py         catalogue loaders, bash and python sides
+locale/en.msg, locale/ru.msg     message catalogues
 config/tools.conf.example        machine config: which vendors, which casks
 skills/brew-to-macports/         thin agent orchestrator for the interactive migration
 docs/GOTCHAS.md                  hard-won traps, each with the incident behind it
 tests/py39-compat.sh             embedded report code must stay 3.9-compatible
+tests/locale-check.sh            catalogues must stay consistent
 ```
 
 ## Requirements

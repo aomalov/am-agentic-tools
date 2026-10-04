@@ -31,6 +31,30 @@ KEEP_VERSIONS="${KEEP_VERSIONS:-2}"
 # 3.9, чтобы работать и на старых macOS.
 PY="${PY:-/usr/bin/python3}"
 
+# Каталог сообщений. Корень определяем от самого файла, чтобы скрипт работал и
+# по симлинку из ~/.local/bin, и из рабочей копии репозитория.
+SELF="${BASH_SOURCE[0]:-$0}"
+while [ -L "$SELF" ]; do
+    _t="$(readlink "$SELF")"
+    case "$_t" in /*) SELF="$_t" ;; *) SELF="$(dirname "$SELF")/$_t" ;; esac
+done
+ROOT_DIR="$(cd "$(dirname "$SELF")/.." && pwd)"
+LIB_DIR="$ROOT_DIR/lib"
+LOCALE_DIR="${BREW2MP_LOCALE_DIR:-$ROOT_DIR/locale}"
+# shellcheck source=../lib/i18n.sh
+if [ -f "$LIB_DIR/i18n.sh" ]; then
+    . "$LIB_DIR/i18n.sh"
+    i18n_init "$LOCALE_DIR"
+else
+    # Без каталога инструмент всё равно должен работать: ключи будут видны как
+    # !key!, но ни одна ветка не упадёт.
+    msg()  { printf '!%s!' "$1"; }
+    msgf() { local f="$1"; shift; printf '!%s!' "$f"; }
+    msgl() { msgf "$@"; printf '\n'; }
+    I18N_LANG=en; I18N_DIR=""
+fi
+export I18N_LIB="$LIB_DIR"
+
 # Инструменты, которые скрипт умеет ставить из официальных бинарников вендора.
 # Переопределяется в конфиге (см. ниже).
 ALL_TOOLS="${ALL_TOOLS:-gh go node pandoc yt-dlp terraform ffmpeg deno resvg gws gcloud}"
@@ -84,34 +108,30 @@ ONLY=""
 ROLLBACK=""
 
 usage() {
-    cat <<USAGE
-upgrade-vendor-packages — вендорские бинарники вместо сборки из исходников в brew
-
-  upgrade_vendor_packages                 проверить и обновить всё
-  upgrade_vendor_packages --check         только отчёт, ничего не менять
-  upgrade_vendor_packages --only gh,go    работать только с этими
-  upgrade_vendor_packages --include-patch брать и патч-релизы тоже
-  upgrade_vendor_packages --rollback node откатить на предыдущую версию
-  upgrade_vendor_packages --list          что установлено сейчас
-  upgrade_vendor_packages --preflight     только проверка brew, без обновлений
-  upgrade_vendor_packages --macports      глубокая проверка готовности MacPorts
-  upgrade_vendor_packages --bootstrap     новая машина: что куда переезжает
-
-Инструменты:  $ALL_TOOLS
-Префикс:      $VENDOR_ROOT   (симлинки в $BIN_DIR)
-
-Обычный запуск делает всё разом: вендорские бинарники, cask'и из brew,
-предполётную проверку brew, обновление портов MacPorts (спросит пароль sudo)
-и сверку появившихся Intel-архивов.
-
-MacPorts обновляется строго через port -b (binary-only): порт без архива под
-нашу платформу останется необновлённым, но компилироваться ничего не будет.
-
-Приложения из brew с политикой «только мажор»: $MAJOR_ONLY_CASKS
-  Они закреплены через brew pin, поэтому brew upgrade их не трогает вообще.
-  Этот скрипт снимает закрепление только ради мажорного апгрейда и возвращает
-  обратно. --include-patch берёт для них и минорные, и патч-релизы.
-USAGE
+    local n="upgrade_vendor_packages"
+    msgl usage.title
+    printf '\n'
+    printf '  %-40s %s\n' "$n"                   "$(msg usage.all)"
+    printf '  %-40s %s\n' "$n --check"           "$(msg usage.check)"
+    printf '  %-40s %s\n' "$n --only gh,go"      "$(msg usage.only)"
+    printf '  %-40s %s\n' "$n --include-patch"   "$(msg usage.patch)"
+    printf '  %-40s %s\n' "$n --rollback node"   "$(msg usage.rollback)"
+    printf '  %-40s %s\n' "$n --list"            "$(msg usage.list)"
+    printf '  %-40s %s\n' "$n --preflight"       "$(msg usage.preflight)"
+    printf '  %-40s %s\n' "$n --macports"        "$(msg usage.macports)"
+    printf '  %-40s %s\n' "$n --bootstrap"       "$(msg usage.bootstrap)"
+    printf '\n'
+    printf '%-14s%s\n' "$(msg usage.tools)"  "$ALL_TOOLS"
+    printf '%-14s%s   %s\n' "$(msg usage.prefix)" "$VENDOR_ROOT" "$(msgf usage.symlinks "$BIN_DIR")"
+    printf '\n'
+    msgl usage.body1; msgl usage.body2; msgl usage.body3
+    printf '\n'
+    msgl usage.body4; msgl usage.body5
+    printf '\n'
+    printf '%s %s\n' "$(msg usage.casks)" "${MAJOR_ONLY_CASKS:-—}"
+    printf '  %s\n' "$(msg usage.casks1)"
+    printf '  %s\n' "$(msg usage.casks2)"
+    printf '  %s\n' "$(msg usage.casks3)"
 }
 
 while [ $# -gt 0 ]; do
@@ -127,7 +147,7 @@ while [ $# -gt 0 ]; do
         --preflight)          ONLY="__preflight__" ;;
         --macports)           ONLY="__macports__" ;;
         -h|--help)            usage; exit 0 ;;
-        *) err "неизвестный аргумент: $1"; usage; exit 2 ;;
+        *) err "$(msgf err.unknown_arg "$1")"; usage; exit 2 ;;
     esac
     shift
 done
@@ -140,14 +160,14 @@ DARWIN_MAJOR="$(uname -r | cut -d. -f1)"
 case "$UNAME_M" in
     x86_64) A_GO=amd64; A_GH=amd64; A_NODE=x64;   A_PANDOC=x86_64; A_TF=amd64; A_DENO=x86_64;  A_RESVG=x86_64;  A_GWS=x86_64;  A_GCLOUD=x86_64 ;;
     arm64)  A_GO=arm64; A_GH=arm64; A_NODE=arm64; A_PANDOC=arm64;  A_TF=arm64; A_DENO=aarch64; A_RESVG=aarch64; A_GWS=aarch64; A_GCLOUD=arm    ;;
-    *)      err "неподдерживаемая архитектура: $UNAME_M"; exit 1 ;;
+    *)      err "$(msgf err.unknown_arch "$UNAME_M")"; exit 1 ;;
 esac
 
 # ------------------------------------------------------------- утилиты -----
 
-need() { command -v "$1" >/dev/null 2>&1 || { err "нет утилиты: $1"; exit 1; }; }
+need() { command -v "$1" >/dev/null 2>&1 || { err "$(msgf err.no_tool "$1")"; exit 1; }; }
 need curl; need unzip; need tar
-[ -x "$PY" ] || { err "нет $PY"; exit 1; }
+[ -x "$PY" ] || { err "$(msgf err.no_py "$PY")"; exit 1; }
 
 fetch() { curl -fsSL --max-time 60 "$@"; }
 
@@ -217,7 +237,7 @@ flatten_into() {
 link_binaries() {
     local tool="$1" ver="$2" d f name
     d="$VENDOR_ROOT/$tool/$ver/bin"
-    [ -d "$d" ] || { err "$tool: не нашёл $d"; return 1; }
+    [ -d "$d" ] || { err "$(msgf err.no_bindir "$tool" "$d")"; return 1; }
     mkdir -p "$BIN_DIR"
     : > "$VENDOR_ROOT/$tool/$ver/.linked"
     for f in "$d"/*; do
@@ -236,7 +256,7 @@ prune_old() {
     for d in $(ls -1 "$VENDOR_ROOT/$tool" 2>/dev/null | sort -V \
                  | awk -v k="$keep" '{a[NR]=$0} END{for(i=1;i<=NR-k;i++) print a[i]}'); do
         rm -rf "${VENDOR_ROOT:?}/$tool/$d"
-        dim "    убрал старую версию $tool $d"
+        dim "    $(msgf vendor.pruned "$tool" "$d")"
     done
 }
 
@@ -400,7 +420,7 @@ install_terraform() {
 install_ffmpeg() {
     local v="$1" dest="$2" tmp b bv
     if [ "$UNAME_M" != "x86_64" ]; then
-        err "ffmpeg: evermeet.cx собирает только под Intel, а тут $UNAME_M"
+        err "$(msgf err.ffmpeg_arch "$UNAME_M")"
         return 1
     fi
     tmp="$(mktemp -d)"
@@ -482,7 +502,7 @@ done
 case "$fmt" in
     png|PNG) ;;
     *)
-        echo "rsvg-convert (resvg): формат '$fmt' не поддерживается — resvg отдаёт только png" >&2
+        printf '%s\n' "@@SHIM_FORMAT@@" >&2
         exit 1 ;;
 esac
 
@@ -502,6 +522,22 @@ else
     exec "$resvg_bin" "$@" "${input:--}" -c
 fi
 SHIM
+    # Текст подставляем уже переведённым: шим это самостоятельный скрипт, в нём
+    # нет ни каталога, ни функций msg. Язык в нём фиксируется на момент
+    # установки — ровно то, что нужно, потому что его stderr читает pandoc, а не
+    # тот, кто сейчас запускает апгрейд.
+    _shim_msg="$(msgf shim.format '%s')"
+    "$PY" - "$path" "$_shim_msg" <<'PYEOF_SHIM'
+import sys
+path, text = sys.argv[1], sys.argv[2]
+with open(path, encoding='utf-8') as fh:
+    body = fh.read()
+# Строка в шиме стоит внутри двойных кавычек, поэтому %s из каталога
+# превращается просто в $fmt: свои кавычки добавлять не надо, они уже есть в
+# тексте сообщения.
+with open(path, 'w', encoding='utf-8') as fh:
+    fh.write(body.replace('@@SHIM_FORMAT@@', text.replace('%s', '$fmt')))
+PYEOF_SHIM
     chmod +x "$path"
 }
 
@@ -542,10 +578,10 @@ install_gcloud() {
     # -type d отсекает симлинк current, иначе приняли бы его за прошлую версию
     prev="$(find "$VENDOR_ROOT/gcloud" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)"
     if [ -n "$prev" ] && [ -x "$prev/bin/gcloud" ]; then
-        dim "    обновляю на месте через gcloud components update"
+        dim "    $(msg vendor.gcloud_inplace)"
         mv "$prev" "$dest" || return 1
         if ! CLOUDSDK_CORE_DISABLE_PROMPTS=1 "$dest/bin/gcloud" components update --quiet; then
-            err "gcloud: components update не прошёл, каталог остаётся на $dest"
+            err "$(msgf err.gcloud_upd "$dest")"
             return 1
         fi
         ln -sfn "$dest" "$VENDOR_ROOT/gcloud/current"
@@ -588,12 +624,12 @@ do_rollback() {
     cur="$(state_get "$tool")"
     prev="$(ls -1 "$VENDOR_ROOT/$tool" 2>/dev/null | sort -V | grep -v "^${cur}$" | tail -1)"
     if [ -z "$prev" ]; then
-        err "$tool: нет предыдущей версии для отката (сейчас ${cur:-ничего})"
+        err "$(msgf err.no_previous "$tool" "${cur:-$(msg err.nothing)}")"
         return 1
     fi
     link_binaries "$tool" "$prev" || return 1
     state_set "$tool" "$prev"
-    ok "$tool: откатил $cur → $prev"
+    ok "$(msgf vendor.rolled_back "$tool" "$cur" "$prev")"
 }
 
 # --------------------------------------------------- обновление MacPorts --
@@ -636,6 +672,9 @@ mp_report_outdated() {
 import concurrent.futures as cf
 import os, re, subprocess, sys
 
+sys.path.insert(0, os.environ.get('I18N_LIB', ''))
+from i18n import t          # каталог сообщений, см. lib/i18n.py
+
 tag  = f"darwin_{os.environ['DARWIN_MAJOR']}"
 arch = os.environ['UNAME_M']
 tty  = sys.stdout.isatty()
@@ -658,7 +697,7 @@ for line in out.splitlines():
     ports.append(line.split()[0])
 
 if not ports:
-    print('  ' + c('2', 'порты в актуальном состоянии'))
+    print('  ' + c('2', t('mpr.up_to_date')))
     sys.exit(0)
 
 def expected_name(p):
@@ -691,14 +730,14 @@ ok   = [p for p in ports if res.get(p)]
 miss = [p for p in ports if res.get(p) is False]
 unk  = [p for p in ports if res.get(p) is None]
 
-print(f"  требуют обновления: {len(ports)}")
+print('  ' + t('mpr.outdated', len(ports)))
 if ok:
-    print('    ' + c('32', 'архив есть: ') + ', '.join(ok))
+    print('    ' + c('32', t('mpr.archive_yes') + ' ') + ', '.join(ok))
 if miss:
-    print('    ' + c('33', 'архива под нашу платформу нет: ') + ', '.join(miss))
-    print('    ' + c('2', 'их -b пропустит; обновятся, когда buildbot доедет'))
+    print('    ' + c('33', t('mpr.archive_no') + ' ') + ', '.join(miss))
+    print('    ' + c('2', t('mpr.skipped_by_b')))
 if unk:
-    print('    ' + c('2', 'не удалось проверить: ') + ', '.join(unk))
+    print('    ' + c('2', t('mpr.uncheckable') + ' ') + ', '.join(unk))
 
 # Список тех, у кого архив совпал — их и будем обновлять поштучно.
 dst = os.environ.get('MP_OUT_LIST')
@@ -713,7 +752,7 @@ macports_upgrade() {
     [ -n "$PORT_BIN" ] || return 0
 
     if [ "$DRY_RUN" -eq 1 ]; then
-        dim "  режим проверки: дерево портов не обновляю, смотрю текущее состояние"
+        dim "  $(msg mp.checkmode)"
         mp_report_outdated
         return 0
     fi
@@ -722,15 +761,15 @@ macports_upgrade() {
     # Без selfupdate локальное дерево отстаёт от сборочной фермы, имя архива
     # не совпадает, и port уходит компилировать. Ровно так собрался tesseract
     # 5.4.1, когда на сервере уже лежал бинарник 5.5.3.
-    dim "  обновляю дерево портов..."
+    dim "  $(msg mp.selfupdate)"
     mp_sync_out="$(mp_sudo "$PORT_BIN" selfupdate 2>&1)"
     mp_rc=$?
     if [ "$mp_rc" -eq 97 ]; then
-        warn "MacPorts: нет прав root и нечем спросить пароль"
-        dim  "  выполни вручную: sudo port selfupdate && sudo port -b upgrade outdated"
+        warn "$(msg mp.no_root)"
+        dim  "  $(msg mp.run_manually)"
         return 0
     elif [ "$mp_rc" -ne 0 ]; then
-        warn "MacPorts: selfupdate не отработал, продолжаю со старым деревом"
+        warn "$(msg mp.selfupdate_bad)"
     else
         printf '%s\n' "$mp_sync_out" \
             | grep -iE "ports tree has been updated|MacPorts base version|Installing new" \
@@ -750,7 +789,7 @@ macports_upgrade() {
     # --- 3. обновляем поштучно -------------------------------------------
     # Пачкой (`upgrade outdated`) первый же порт без архива обрывает всё
     # остальное. Поштучно — неудача одного не мешает прочим.
-    dim "  обновляю (binary-only, сборки из исходников не будет)..."
+    dim "  $(msg mp.upgrading)"
     mp_done=0
     mp_fail=""
     while IFS= read -r mp_p; do
@@ -759,17 +798,17 @@ macports_upgrade() {
             ok "    $mp_p"
             mp_done=$((mp_done + 1))
         else
-            err "$mp_p: обновить не удалось"
+            err "$(msgf mp.upgrade_failed "$mp_p")"
             mp_fail="$mp_fail $mp_p"
         fi
     done < "$mp_list"
     rm -f "$mp_list"
 
     if [ "$mp_done" -gt 0 ]; then
-        SUMMARY="$SUMMARY\n  MacPorts  обновлено портов: $mp_done"
+        SUMMARY="$SUMMARY\n  MacPorts  $(msgf mp.sum_upgraded "$mp_done")"
     fi
     if [ -n "$mp_fail" ]; then
-        SUMMARY="$SUMMARY\n  MacPorts  не обновились:$mp_fail"
+        SUMMARY="$SUMMARY\n  MacPorts  $(msgf mp.sum_failed "$mp_fail")"
         FAILED=1
     fi
 
@@ -781,12 +820,12 @@ macports_prune_inactive() {
     local n
     n="$("$PORT_BIN" -q installed inactive 2>/dev/null | grep -c . || true)"
     [ "${n:-0}" -gt 0 ] || return 0
-    dim "  убираю неактивные версии портов: $n"
+    dim "  $(msgf mp.pruning "$n")"
     if mp_sudo "$PORT_BIN" -N uninstall inactive >/dev/null 2>&1; then
-        ok "    неактивные версии сняты"
-        SUMMARY="$SUMMARY\n  MacPorts  снято неактивных версий: $n"
+        ok "    $(msg mp.pruned)"
+        SUMMARY="$SUMMARY\n  MacPorts  $(msgf mp.pruning "$n")"
     else
-        warn "MacPorts: неактивные версии снять не удалось"
+        warn "$(msg mp.prune_failed)"
     fi
 }
 
@@ -827,6 +866,9 @@ macports_check() {
 import concurrent.futures as cf
 import json, os, re, subprocess, sys, time
 
+sys.path.insert(0, os.environ.get('I18N_LIB', ''))
+from i18n import t          # каталог сообщений, см. lib/i18n.py
+
 arch  = os.environ['UNAME_M']
 tag   = f"darwin_{os.environ['DARWIN_MAJOR']}.{arch}"
 # Архив, пригодный на этой машине. Кроме обычного darwin_<N>.<arch> бывают
@@ -859,7 +901,7 @@ if not os.environ['WATCH_LIST'].strip():
         pass
     # Пустой список — нормальное состояние, но молчать про него нельзя:
     # надо видеть, что именно ещё держит Homebrew и почему это не уезжает.
-    print('  ' + c('32', 'переезжать из brew больше нечего'))
+    print('  ' + c('32', t('mpc.nothing_left')))
     try:
         formulae = subprocess.run(['brew', 'list', '--formula'],
                                   capture_output=True, text=True, timeout=60).stdout.split()
@@ -872,10 +914,10 @@ if not os.environ['WATCH_LIST'].strip():
             for ck in info.get('casks') or []:
                 for f in (ck.get('depends_on') or {}).get('formula') or []:
                     locked.setdefault(f, []).append(ck['token'])
-        print('  ' + c('2', f'в brew осталось формул: {len(formulae)}, cask\'ов: {len(casks)}'))
+        print('  ' + c('2', t('mpc.remaining', len(formulae), len(casks))))
         for f, by in sorted(locked.items()):
-            print('  ' + c('2', f'{f} держит cask {", ".join(by)} — переехать не может,'))
-            print('  ' + c('2', 'cask завязан именно на брюшную формулу; остальное это его обвязка'))
+            print('  ' + c('2', t('mpc.held_by_cask', f, ', '.join(by))))
+            print('  ' + c('2', t('mpc.held_note')))
     except Exception:
         pass
     sys.exit(0)
@@ -1007,34 +1049,34 @@ stale  = [w for w in watch if state_of(w[0]) == 'stale']
 fresh  = [w for w in ready if prev.get(w[0]) not in ('ready', 'maybe')]
 urgent = [w for w in watch if brew_state(w[1]) == 'source']
 
-print(f"  цель: {c('1', tag)}   портов под наблюдением: {len(watch)}")
+print('  ' + t('mpc.target', c('1', tag), len(watch)))
 for port, repl in watch:
     a = got[port]
     st = brew_state(repl)
     if st == 'source':
-        why = c('31', 'brew УЖЕ собирает из исходников')
+        why = c('31', t('mpc.why_building'))
     elif st == 'bottle':
-        why = c('2', 'brew пока льёт бутылку')
+        why = c('2', t('mpc.why_bottle'))
     else:
-        why = c('2', 'в brew не установлено')
+        why = c('2', t('mpc.why_absent'))
 
     if a and a[0] == 'ready':
-        new = c('1;32', ' ← НОВОЕ') if (port, repl) in fresh else ''
-        print(f"    {c('32', '✓')} {port:13s} → {repl:12s} архив {a[2]}{new}")
+        new = c('1;32', ' ' + t('mpc.new')) if (port, repl) in fresh else ''
+        print(f"    {c('32', '✓')} {port:13s} → {repl:12s} {t('mpc.has_archive', a[2])}{new}")
     elif a and a[0] == 'maybe':
-        new = c('1;32', ' ← НОВОЕ') if (port, repl) in fresh else ''
-        print(f"    {c('32', '✓')} {port:13s} → {repl:12s} архив {a[2]}{new}")
-        print(f"      {c('2', 'MacPorts не установлен — с версией в дереве не сверял')}")
+        new = c('1;32', ' ' + t('mpc.new')) if (port, repl) in fresh else ''
+        print(f"    {c('32', '✓')} {port:13s} → {repl:12s} {t('mpc.has_archive', a[2])}{new}")
+        print(f"      {c('2', t('mpc.no_mp_compare'))}")
     elif a and a[0] == 'stale':
-        print(f"    {c('33', '≈')} {port:13s} → {repl:12s} {c('33', 'архив есть, но не под версию из дерева')}")
-        print(f"      {c('33', 'нужен sudo port selfupdate, иначе port будет СОБИРАТЬ')}")
-        print(f"      {c('2', 'на сервере: ' + a[1])}")
+        print(f"    {c('33', '≈')} {port:13s} → {repl:12s} {c('33', t('mpc.stale_archive'))}")
+        print(f"      {c('33', t('mpc.need_selfupd'))}")
+        print(f"      {c('2', t('mpc.on_server', a[1]))}")
     else:
-        print(f"    {c('2', '·')} {port:13s} → {repl:12s} архива нет   {why}")
+        print(f"    {c('2', '·')} {port:13s} → {repl:12s} {t('mpc.no_archive')}   {why}")
 
 if deep:
     print()
-    print(c('1', '  Глубокая проверка: готовность дерева зависимостей'))
+    print(c('1', '  ' + t('mpc.deep_head')))
     dep_cache, rdy_cache = {}, {}
 
     def libdeps(port):
@@ -1073,11 +1115,11 @@ if deep:
         miss = [p for p in closure if not res[p]]
         pct = 100 * len(ok) // max(len(closure), 1)
         col = '32' if not miss else ('33' if pct >= 70 else '2')
-        print(f"    {c(col, f'{pct:3d}%')} {port:14s} {len(ok)}/{len(closure)} портов")
+        print(f"    {c(col, f'{pct:3d}%')} {port:14s} {t('mpc.deep_ports', len(ok), len(closure))}")
         if miss and len(miss) <= 12:
-            print(c('2', f"           ждём: {', '.join(miss)}"))
+            print(c('2', '           ' + t('mpc.deep_waiting', ', '.join(miss))))
         elif miss:
-            print(c('2', f"           ждём ещё {len(miss)}, в т.ч.: {', '.join(miss[:10])}…"))
+            print(c('2', '           ' + t('mpc.deep_waiting_n', len(miss), ', '.join(miss[:10]) + '…')))
 
 os.makedirs(os.path.dirname(state), exist_ok=True)
 with open(state, 'w') as fh:
@@ -1086,7 +1128,7 @@ with open(state, 'w') as fh:
 
 if ready:
     print()
-    title = f'Готово к переезду в MacPorts: {len(ready)}'
+    title = t('mpc.ready_title', len(ready))
     print(c('1;32', '  ╔' + '═' * 66 + '╗'))
     print(c('1;32', '  ║  ' + title.ljust(64) + '║'))
     print(c('1;32', '  ╚' + '═' * 66 + '╝'))
@@ -1094,10 +1136,9 @@ if ready:
 
     have_port = bool(os.environ.get('PORT_BIN'))
     if not have_port:
-        print('  MacPorts ещё не установлен:')
-        print('    1. pkg под macOS ' + os.environ['DARWIN_MAJOR']
-              + ': https://www.macports.org/install.php')
-        print('    2. sudo port selfupdate')
+        print('  ' + t('mpc.mp_missing'))
+        print('    ' + t('mpc.mp_step1', os.environ['DARWIN_MAJOR']))
+        print('    ' + t('mpc.mp_step2'))
         print()
 
     # Сколько портов приедет следом. Через `port rdeps`, а не `port -y install`:
@@ -1130,40 +1171,40 @@ if ready:
         return len(todo) if todo else 0
 
     for port, repl in ready:
-        tag_new = c('1;32', '   ← НОВОЕ') if (port, repl) in fresh else ''
+        tag_new = c('1;32', '   ' + t('mpc.new')) if (port, repl) in fresh else ''
         print(f"  {c('1', port)}{tag_new}")
         n = incoming(port)
         if n is not None:
-            print(f"    {c('2', f'потянет за собой портов: {n}')}")
+            print(f"    {c('2', t('mpc.pulls_in', n))}")
         print(f"    {c('32', 'sudo port -b install ' + port)}")
         if repl and brew_state(repl):
             print(f"    {c('32', 'brew uninstall ' + repl)}")
             print(f"    {c('32', 'brew autoremove')}")
         print()
 
-    print('  ' + c('1', 'Скажи «переезжаем ' + ', '.join(p for p, _ in ready) + '»'))
-    print('  ' + 'и я сделаю это сам: поставлю порты, проверю что встали бинарником,')
-    print('  ' + 'сниму из brew и подчищу осиротевшее.')
+    print('  ' + c('1', t('mpc.say_migrate', ', '.join(p for p, _ in ready))))
+    print('  ' + t('mpc.say_migrate2'))
+    print('  ' + t('mpc.say_migrate3'))
     print()
-    print('  ' + c('2', 'Флаг -b обязателен: binary-only, прерывается вместо сборки.'))
-    print('  ' + c('2', 'Смысл переезда: MacPorts живёт в '
-          + (os.environ.get('MP_PREFIX') or '/opt/local') + ' со своими копиями'))
-    print('  ' + c('2', 'библиотек, не зависит от системных и поддерживает Intel годами.'))
+    print('  ' + c('2', t('mpc.b_required')))
+    print('  ' + c('2', t('mpc.point_of_it',
+                            os.environ.get('MP_PREFIX') or '/opt/local')))
+    print('  ' + c('2', t('mpc.point_of_it2')))
 else:
-    print('  ' + c('2', 'готовых к переезду портов нет'))
+    print('  ' + c('2', t('mpc.none_ready')))
 
 
 # Отдельной строкой, независимо от новинок: за что горит прямо сейчас.
 if stale:
     print()
-    print('  ' + c('33', 'Дерево портов отстало от сервера: ' + ', '.join(w[0] for w in stale)))
-    print('  ' + c('33', 'Архивы собраны, но под другие версии. Сначала sudo port selfupdate.'))
+    print('  ' + c('33', t('mpc.tree_behind', ', '.join(w[0] for w in stale))))
+    print('  ' + c('33', t('mpc.tree_behind2')))
 
 if urgent:
     waiting = [w for w in urgent if state_of(w[0]) != 'ready']
     if waiting:
         names = ', '.join(w[1] for w in waiting)
-        print('  ' + c('31', f'срочно (brew уже компилирует, а порта ещё нет): {names}'))
+        print('  ' + c('31', t('mpc.urgent', names)))
 PYEOF
 }
 
@@ -1187,6 +1228,9 @@ macports_rebuild_watch() {
 
     PORT_BIN="$PORT_BIN" WATCH_FILE="$WATCH_LIST_FILE" "$PY" - <<'PYEOF'
 import json, os, re, subprocess, sys
+
+sys.path.insert(0, os.environ.get('I18N_LIB', ''))
+from i18n import t          # каталог сообщений, см. lib/i18n.py
 
 PORT = os.environ['PORT_BIN']
 DEST = os.environ['WATCH_FILE']
@@ -1250,15 +1294,14 @@ with open(DEST, 'w') as fh:
         fh.write("\n")
 
 if lines:
-    print('  ' + f"список пересобран из brew leaves: {len(lines)} шт. — "
+    print('  ' + t('mpw.rebuilt', len(lines)) + ' '
           + ', '.join(l.split(':')[0] for l in lines))
 if locked_out:
-    print('  ' + f"переехать не могут: {', '.join(locked_out)} — их требуют cask'и")
+    print('  ' + t('mpw.locked_out', ', '.join(locked_out)))
 if no_port:
-    print('  ' + f"имя порта не подобралось: {', '.join(no_port)}")
-    print('  ' + "  (brew и MacPorts зовут пакеты по-разному — libpq это "
-                 "postgresql18;")
-    print('  ' + "   если такой нужен, впиши строкой в MACPORTS_WATCH вручную)")
+    print('  ' + t('mpw.no_port_name', ', '.join(no_port)))
+    print('  ' + "  " + t('mpw.naming_note'))
+    print('  ' + "   " + t('mpw.naming_note2'))
 PYEOF
 }
 
@@ -1304,13 +1347,13 @@ macports_show_cached() {
     while IFS=$'\t' read -r port status rest; do
         [ -n "$port" ] || continue
         if [ "$status" = "ready" ]; then
-            printf '    %s✓%s %-14s Intel-архив есть\n' "$C_GREEN" "$C_RESET" "$port"
+            printf '    %s✓%s %-14s %s\n' "$C_GREEN" "$C_RESET" "$port" "$(msg mp.archive_yes)"
             n_ready=$((n_ready + 1))
         else
-            printf '    %s· %-14s ждём Intel-архив%s\n' "$C_DIM" "$port" "$C_RESET"
+            printf '    %s· %-14s %s%s\n' "$C_DIM" "$port" "$(msg mp.archive_wait)" "$C_RESET"
         fi
     done < "$WATCH_STATE"
-    dim "  (данные за сегодня; --macports — проверить заново и глубоко)"
+    dim "  $(msg mp.cached_today)"
 }
 
 # ------------------------------------------ предполётная проверка brew ----
@@ -1332,13 +1375,16 @@ brew_preflight() {
     "$PY" - <<'PYEOF'
 import glob, json, os, re, subprocess, sys
 
+sys.path.insert(0, os.environ.get('I18N_LIB', ''))
+from i18n import t          # каталог сообщений, см. lib/i18n.py
+
 def sh(*a):
     return subprocess.run(a, capture_output=True, text=True).stdout
 
 cache = sh('brew', '--cache').strip()
 found = glob.glob(os.path.join(cache, 'api/internal/packages.*.jws.json.payload'))
 if not found:
-    print('  кэш brew не найден — предполётная проверка пропущена (нужен brew update)')
+    print('  ' + t('pf.no_cache'))
     sys.exit(0)
 # Самый свежий, а не алфавитно первый: после апгрейда macOS рядом лежит payload
 # прошлой ОС, и бутылки посчитались бы не для этой платформы.
@@ -1348,7 +1394,7 @@ try:
     F = _d['formulae']
     BREW_TAG = (_d.get('metadata') or {}).get('bottle_tag')
 except Exception as exc:
-    print(f'  не смог прочитать кэш brew: {exc}')
+    print('  ' + t('pf.cache_unread', exc))
     sys.exit(0)
 
 tty = sys.stdout.isatty()
@@ -1370,7 +1416,7 @@ live = [r for r in rows if not r[3]]
 held = [r for r in rows if r[3]]
 
 if not rows:
-    print('  ' + c('2', 'brew: обновлять нечего'))
+    print('  ' + c('2', t('pf.nothing')))
     sys.exit(0)
 
 def has_bottle(n):
@@ -1421,32 +1467,32 @@ for name, cur, new, _ in live:
     if hv:
         worst = max(worst, 2)
         mark, col = '‼', '31'
-        tail = c('31', 'из исходников: ' + ', '.join(src)) + c('1;31', f'  ← ТЯЖЁЛЫЙ ТУЛЧЕЙН: {", ".join(hv)}')
+        tail = c('31', t('pf.from_source', ', '.join(src))) + c('1;31', '  ' + t('pf.heavy', ', '.join(hv)))
     elif src:
         worst = max(worst, 1)
         mark, col = '!', '33'
-        tail = c('33', 'из исходников: ' + ', '.join(src))
+        tail = c('33', t('pf.from_source', ', '.join(src)))
     else:
         mark, col = '✓', '32'
-        tail = c('2', 'разольётся бутылкой')
+        tail = c('2', t('pf.will_pour'))
     lines.append(f"  {c(col, mark)} {name:22s} {cur} → {new}   {tail}")
 
-print(f"  ждут обновления: {len(live)}")
+print('  ' + t('pf.pending', len(live)))
 for l in lines:
     print(l)
 
 if held:
-    print('  ' + c('2', 'закреплены и не тронутся: ' + ', '.join(n for n, _, _, _ in held)))
+    print('  ' + c('2', t('pf.held', ', '.join(n for n, _, _, _ in held))))
 
 if worst == 2:
     print()
-    print(c('1;31', '  Не запускай brew upgrade целиком.'))
-    print(c('31',   '  Тяжёлый тулчейн собирается часами и берёт все ядра — бутстрап'))
-    print(c('31',   '  rust и сборка LLVM на HOMEBREW_MAKE_JOBS не смотрят.'))
-    print(c('31',   '  Закрепи виновника: ') + c('1;31', 'brew pin <формула>'))
+    print(c('1;31', '  ' + t('pf.dont_upgrade')))
+    print(c('31', '  ' + t('pf.heavy_note1')))
+    print(c('31', '  ' + t('pf.heavy_note2')))
+    print(c('31', '  ' + t('pf.heavy_note3') + ' ') + c('1;31', t('pf.heavy_cmd')))
 elif worst == 1:
     print()
-    print(c('33', '  Сборки из исходников есть, но тяжёлого тулчейна нет — это минуты.'))
+    print(c('33', '  ' + t('pf.minutes')))
 PYEOF
 }
 
@@ -1475,6 +1521,9 @@ brew_orphan_watch() {
     "$PY" - <<'PYEOF'
 import glob, json, os, subprocess, sys
 
+sys.path.insert(0, os.environ.get('I18N_LIB', ''))
+from i18n import t          # каталог сообщений, см. lib/i18n.py
+
 def sh(*a):
     return subprocess.run(a, capture_output=True, text=True).stdout
 
@@ -1484,7 +1533,7 @@ def c(code, s):
 
 installed = sorted(sh('brew', 'list', '--formula').split())
 if not installed:
-    print('  ' + c('32', 'формул в brew не осталось — держать нечего'))
+    print('  ' + c('32', t('ow.none_left')))
     sys.exit(0)
 
 pinned = set(sh('brew', 'list', '--pinned').split())
@@ -1509,7 +1558,7 @@ info = sh('brew', 'info', '--json=v2', '--installed')
 try:
     data = json.loads(info)
 except Exception as exc:
-    print(f'  не смог прочитать brew info: {exc}')
+    print('  ' + t('ow.info_unread', exc))
     sys.exit(0)
 
 fdeps = {}
@@ -1523,17 +1572,17 @@ for k in data.get('casks', []):
         cdeps[k['token']] = fl
 
 def holders(n):
-    out = [f'формула {f}' for f, ds in fdeps.items() if n in ds and f != n]
-    out += [f"cask {t}" for t, fl in cdeps.items() if n in fl]
+    out = [t('ow.holder_formula', f) for f, ds in fdeps.items() if n in ds and f != n]
+    out += [t('ow.holder_cask', ck) for ck, fl in cdeps.items() if n in fl]
     return out
 
 roots   = [n for n in installed if not holders(n)]
 by_cask = [n for n in installed if holders(n) and all(h.startswith('cask ') for h in holders(n))]
 
-print(f"  формул установлено: {len(installed)}")
+print('  ' + t('ow.installed', len(installed)))
 
 if roots:
-    print('  ' + c('1;33', 'держать их некому — можно сносить:'))
+    print('  ' + c('1;33', t('ow.no_holders')))
     for n in roots:
         print(f"    {c('33', n)}")
     print(f"    {c('32', 'brew uninstall ' + ' '.join(roots))}")
@@ -1546,32 +1595,32 @@ for n in by_cask:
     pulls = sorted(d for d in fdeps.get(n, []) if d in installed)
     nb = [x for x in [n] + pulls if not has_bottle(x)]
     print()
-    print('  ' + c('1;33', f'{n} держит только cask: {", ".join(who)}'))
-    print('    ' + c('2', 'формулы на него не ссылаются; в рантайме cask берёт свой питон'))
+    print('  ' + c('1;33', t('ow.cask_only', n, ', '.join(who))))
+    print('    ' + c('2', t('ow.cask_only_note')))
     if pulls:
-        print('    ' + c('2', 'тянет за собой: ' + ', '.join(pulls)))
+        print('    ' + c('2', t('ow.pulls', ', '.join(pulls))))
     if nb:
-        print('    ' + c('31', 'без Intel-бутылки, при переустановке соберётся из исходников:'))
+        print('    ' + c('31', t('ow.no_bottle')))
         print('      ' + c('31', ', '.join(nb)))
     need_unpin = [x for x in [n] + pulls if x in pinned]
-    print('    ' + c('1', 'снести так — порядок важен, между командами не запускай brew upgrade:'))
+    print('    ' + c('1', t('ow.order_matters')))
     for u in need_unpin:
         print(f"      {c('32', 'brew unpin ' + u)}")
     print(f"      {c('32', 'brew uninstall --ignore-dependencies ' + n)}")
     print(f"      {c('32', 'brew autoremove')}")
-    print('    ' + c('2', f'вернётся при brew upgrade --cask {who[0]} — тогда снова закрепи'))
+    print('    ' + c('2', t('ow.will_return', who[0])))
 
 # Главный страж: установленная формула без бутылки и без пина — это заложенная
 # сборка из исходников на ближайший brew upgrade.
 risky = [n for n in installed if not has_bottle(n) and n not in pinned]
 if risky:
     print()
-    print('  ' + c('1;31', 'без бутылки и НЕ закреплены — следующий brew upgrade будет их собирать:'))
+    print('  ' + c('1;31', t('ow.risky')))
     for n in risky:
         print(f"    {c('31', n)}")
     print(f"    {c('32', 'brew pin ' + ' '.join(risky))}")
 elif not roots and not by_cask:
-    print('  ' + c('32', 'всё закреплено или имеет бутылку — внезапных сборок не будет'))
+    print('  ' + c('32', t('ow.all_safe')))
 PYEOF
 }
 
@@ -1598,24 +1647,24 @@ bootstrap_report() {
     local n_state=0
     [ -f "$STATE_FILE" ] && n_state="$(grep -c . "$STATE_FILE" 2>/dev/null || echo 0)"
 
-    head1 "Новый переезд · инвентаризация"
-    printf '  платформа: %s · darwin %s\n' "$UNAME_M" "$DARWIN_MAJOR"
+    head1 "$(msg boot.head)"
+    printf '  %-10s %s · darwin %s\n' "$(msg boot.platform)" "$UNAME_M" "$DARWIN_MAJOR"
     if [ -n "$PORT_BIN" ]; then
-        printf '  MacPorts:  %s (префикс %s)\n' "$PORT_BIN" "$MP_PREFIX"
+        printf '  %-10s %s %s\n' "$(msg boot.macports)" "$PORT_BIN" "$(msgf boot.mp_prefix "$MP_PREFIX")"
     else
-        printf '  MacPorts:  %sне установлен%s — шаг 2 будет пропущен\n' "$C_YELLOW" "$C_RESET"
-        printf '             pkg под эту macOS: https://www.macports.org/install.php\n'
+        printf '  %-10s %s%s%s %s\n' "$(msg boot.macports)" "$C_YELLOW" "$(msg boot.mp_missing)" "$C_RESET" "$(msg boot.mp_skipped)"
+        printf '             %s\n' "\$(msg boot.mp_pkg)"
     fi
-    printf '  вендоров в state.tsv: %s\n' "$n_state"
+    printf '  %s %s\n' "$(msg boot.state)" "$n_state"
     if [ -n "$CONFIG_FILE" ]; then
-        printf '  конфиг:    %s\n' "$CONFIG_FILE"
+        printf '  %-10s %s\n' "$(msg boot.config)" "$CONFIG_FILE"
     else
-        printf '  конфиг:    %sне найден%s — работают значения по умолчанию\n' "$C_DIM" "$C_RESET"
+        printf '  %-10s %s%s%s %s\n' "$(msg boot.config)" "$C_DIM" "$(msg boot.no_config)" "$C_RESET" "$(msg boot.defaults)"
     fi
     printf '\n'
 
     command -v brew >/dev/null 2>&1 || {
-        ok "  Homebrew на этой машине нет — переезжать не с чего"
+        ok "  $(msg boot.no_brew)"
         return 0
     }
 
@@ -1623,6 +1672,9 @@ bootstrap_report() {
     PORT_BIN="$PORT_BIN" "$PY" - <<'PYEOF'
 import concurrent.futures as cf
 import json, os, re, subprocess, sys
+
+sys.path.insert(0, os.environ.get('I18N_LIB', ''))
+from i18n import t          # каталог сообщений, см. lib/i18n.py
 
 tty = sys.stdout.isatty()
 def c(code, s):
@@ -1642,7 +1694,7 @@ ARCH_RE = (r'\.(?:darwin_' + re.escape(os.environ['DARWIN_MAJOR']) +
 installed = sorted(sh('brew', 'list', '--formula').split())
 casks     = sorted(sh('brew', 'list', '--cask').split())
 if not installed and not casks:
-    print('  ' + c('32', 'в Homebrew ничего не установлено — переезжать нечего'))
+    print('  ' + c('32', t('bs.brew_empty')))
     sys.exit(0)
 
 # Бутылки — из того же кэша, по которому brew решает «лить или собирать».
@@ -1658,10 +1710,10 @@ try:
 except Exception:
     pass
 
-print(f"  Homebrew: формул {len(installed)}, cask'ов {len(casks)}"
-      + (f", bottle_tag {TAG}" if TAG else ''))
+print('  ' + t('bs.inventory', len(installed), len(casks))
+      + (t('bs.bottle_tag', TAG) if TAG else ''))
 if not F:
-    print('  ' + c('33', 'кэш brew не прочитан — про бутылки сказать нечего, сделай brew update'))
+    print('  ' + c('33', t('bs.cache_unread')))
 print()
 
 VENDOR = set(os.environ['ALL_TOOLS'].split())
@@ -1681,8 +1733,8 @@ except Exception:
     pass
 
 def holders(n):
-    return ([f'формула {f}' for f, ds in fdeps.items() if n in ds and f != n]
-            + [f'cask {t}' for t, fl in cdeps.items() if n in fl])
+    return ([t('ow.holder_formula', f) for f, ds in fdeps.items() if n in ds and f != n]
+            + [t('ow.holder_cask', ck) for ck, fl in cdeps.items() if n in fl])
 
 # --- MacPorts: порт существует И архив ровно под эту платформу ---------------
 # Имя архива собирается из версии, ревизии и ДЕФОЛТНЫХ вариантов. Проверять
@@ -1692,28 +1744,28 @@ def holders(n):
 # найдёт — так было с gnupg2 (+pinentry против +pinentry_mac).
 def mp_status(name):
     if not PORT:
-        return ('нет-macports', '')
+        return ('no_macports', '')
     if not sh(PORT, 'info', '--name', '--line', name, t=60).strip():
-        return ('нет-порта', '')
+        return ('no_port', '')
     v = sh(PORT, 'info', '--version', '--line', name, t=60).strip()
     r = sh(PORT, 'info', '--revision', '--line', name, t=60).strip() or '0'
     if not v:
-        return ('нет-порта', '')
+        return ('no_port', '')
     defs = sorted(re.findall(r'^\s*\[\+\](\S+?):', sh(PORT, 'variants', name, t=60), re.M))
     exp = f'{name}-{v}_{r}' + ''.join('+' + d for d in defs)
     page = sh('curl', '-fsS', '--max-time', '25',
               f'https://packages.macports.org/{name}/', t=40)
     rows = re.findall(re.escape(name) + r'-[^"<>]*?' + ARCH_RE, page)
     if any(x.startswith(exp + '.') for x in rows):
-        return ('архив', exp)
+        return ('archive', exp)
     if rows:
-        return ('архив-устарел', exp)
-    return ('нет-архива', exp)
+        return ('archive_stale', exp)
+    return ('no_archive', exp)
 
 targets = [n for n in installed if n not in VENDOR]
 mp = {}
 if targets and PORT:
-    print('  ' + c('2', f'проверяю {len(targets)} формул в MacPorts...'))
+    print('  ' + c('2', t('bs.probing', len(targets))))
     with cf.ThreadPoolExecutor(max_workers=8) as ex:
         for n, res in zip(targets, ex.map(mp_status, targets)):
             mp[n] = res
@@ -1725,30 +1777,30 @@ for n in installed:
     if n in VENDOR:
         route_vendor.append((n, bottled))
         continue
-    st, exp = mp.get(n, ('нет-macports', ''))
-    if st == 'архив':
+    st, exp = mp.get(n, ('no_macports', ''))
+    if st == 'archive':
         route_mp.append((n, bottled, exp))
     else:
         route_stay.append((n, bottled, st, exp))
 
 def mark(bottled):
-    return c('2', 'бутылка есть') if bottled else c('31', 'БЕЗ БУТЫЛКИ — соберётся из исходников')
+    return c('2', t('bs.bottled')) if bottled else c('31', t('bs.not_bottled'))
 
 if not installed:
-    print('  ' + c('32', 'формул в brew нет — переезжать нечего, остались только cask\'и'))
+    print('  ' + c('32', t('bs.only_casks')))
 
 if route_vendor:
-    print('  ' + c('1;32', f'1. Вендорский бинарник — {len(route_vendor)} шт.'))
-    print('     ' + c('2', 'этот скрипт умеет их ставить сам, компилятор и root не нужны'))
+    print('  ' + c('1;32', t('bs.route1', len(route_vendor))))
+    print('     ' + c('2', t('bs.route1_note')))
     for n, b in route_vendor:
         print(f'     {c("32", n):<28} {mark(b)}')
     print(f'     {c("32", "upgrade_vendor_packages --only " + ",".join(n for n, _ in route_vendor))}')
-    print(f'     {c("32", "brew uninstall " + " ".join(n for n, _ in route_vendor))}   ← после проверки')
+    print(f'     {c("32", "brew uninstall " + " ".join(n for n, _ in route_vendor))}   ' + t('bs.after_check'))
     print()
 
 if route_mp:
-    print('  ' + c('1;32', f'2. MacPorts — {len(route_mp)} шт., архив под эту платформу есть'))
-    print('     ' + c('2', 'строго с -b: без архива порт не станет компилироваться, а просто пропустится'))
+    print('  ' + c('1;32', t('bs.route2', len(route_mp))))
+    print('     ' + c('2', t('bs.route2_note')))
     for n, b, exp in route_mp:
         print(f'     {c("32", n):<28} {mark(b)}')
         print(f'       {c("2", exp)}')
@@ -1756,33 +1808,33 @@ if route_mp:
     print()
 
 if route_stay:
-    why = {'нет-порта': 'в MacPorts порта нет',
-           'нет-архива': 'порт есть, но архива под эту платформу нет',
-           'архив-устарел': 'архив есть, но не той версии, которую хочет дерево портов',
-           'нет-macports': 'MacPorts не установлен'}
-    print('  ' + c('1;33', f'3. Пока остаётся в brew — {len(route_stay)} шт.'))
+    why = {'no_port':       t('bs.why_no_port'),
+           'no_archive':    t('bs.why_no_archive'),
+           'archive_stale': t('bs.why_stale'),
+           'no_macports':   t('bs.why_no_mp')}
+    print('  ' + c('1;33', t('bs.route3', len(route_stay))))
     for n, b, st, exp in route_stay:
         h = holders(n)
-        tail = c('2', '← ' + ', '.join(h)) if h else c('33', '← не держит никто, можно сносить')
+        tail = c('2', '← ' + ', '.join(h)) if h else c('33', t('bs.nobody_holds'))
         print(f'     {n:<28} {mark(b)}')
         print(f'       {c("2", why.get(st, st))}  {tail}')
     risky = [n for n, b, _, _ in route_stay if not b]
     if risky:
         print()
-        print('     ' + c('1;31', 'Эти соберутся из исходников на первом же brew upgrade.'))
-        print('     ' + c('31', 'Закрепи их, пока не нашлась замена:'))
+        print('     ' + c('1;31', t('bs.risky1')))
+        print('     ' + c('31', t('bs.risky2')))
         print(f'     {c("32", "brew pin " + " ".join(risky))}')
     print()
 
 if cdeps:
-    print('  ' + c('1;33', "cask'и, тянущие формулы — их переезд упирается в cask, а не в формулу:"))
-    for t, fl in sorted(cdeps.items()):
-        print(f'     cask {c("33", t)} → {", ".join(fl)}')
+    print('  ' + c('1;33', t('bs.cask_pulls')))
+    for ck, fl in sorted(cdeps.items()):
+        print(f'     cask {c("33", ck)} → {", ".join(fl)}')
     print()
 
 if installed:
-    print('  ' + c('1', 'Порядок: сначала пункт 1, потом 2, и только то, что осталось — пункт 3.'))
-    print('  ' + c('1', 'После каждого шага проверяй, что инструмент работает, и только потом сноси из brew.'))
+    print('  ' + c('1', t('bs.order1')))
+    print('  ' + c('1', t('bs.order2')))
 PYEOF
 }
 
@@ -1852,15 +1904,15 @@ do_casks() {
     cask_available || return 0
     [ -n "$(printf '%s' "$list" | tr -d ' ')" ] || return 0
 
-    head1 "Приложения из brew · только мажорные версии"
+    head1 "$(msg cask.head)"
 
     for token in $list; do
         printf '%s%-12s%s ' "$C_CYAN" "$token" "$C_RESET"
 
         line="$(cask_info "$token")"
         if [ -z "$line" ]; then
-            printf '\n'; err "$token: brew не отдал данные о cask'е"
-            SUMMARY="$SUMMARY\n  $token  — ошибка запроса к brew"
+            printf '\n'; err "$(msgf cask.no_data "$token")"
+            SUMMARY="$SUMMARY\n  $token  $(msg sum.request_error)"
             FAILED=1
             continue
         fi
@@ -1869,42 +1921,42 @@ do_casks() {
 
         cur="$(cask_installed_version "$token" "$app")"
         if [ -z "$cur" ]; then
-            printf 'не установлен\n'
-            dim "    поставить: brew install --cask $token"
+            printf '%s\n' "$(msg cask.not_installed)"
+            dim "    $(msgf cask.install_hint "$token")"
             continue
         fi
 
         rel="$(ver_relation "$cur" "$latest")"
         case "$rel" in
-            same)  printf 'уже последняя (%s)\n' "$cur"; action="skip" ;;
-            older) printf 'в кране %s, у нас новее (%s)\n' "$latest" "$cur"; action="skip" ;;
+            same)  msgl cask.latest "$cur"; action="skip" ;;
+            older) msgl cask.ours_newer "$latest" "$cur"; action="skip" ;;
             newer-major)
-                printf '%s%s → %s (МАЖОР)%s\n' "$C_YELLOW" "$cur" "$latest" "$C_RESET"
+                printf '%s%s%s\n' "$C_YELLOW" "$(msgf cask.major "$cur" "$latest")" "$C_RESET"
                 action="upgrade" ;;
             newer-minor|newer-patch)
                 if [ "$INCLUDE_PATCH" -eq 1 ]; then
-                    printf '%s → %s (%s, взято из-за --include-patch)\n' "$cur" "$latest" "${rel#newer-}"
+                    msgl cask.taken_patch "$cur" "$latest" "${rel#newer-}"
                     action="upgrade"
                 else
-                    printf '%s%s → %s — не мажор, пропускаю%s\n' "$C_DIM" "$cur" "$latest" "$C_RESET"
+                    printf '%s%s%s\n' "$C_DIM" "$(msgf cask.not_major "$cur" "$latest")" "$C_RESET"
                     action="skip"
-                    SUMMARY="$SUMMARY\n  $token  $cur → $latest  пропущен: не мажор (--include-patch чтобы взять)"
+                    SUMMARY="$SUMMARY\n  $token  $cur → $latest  $(msg cask.sum_skipped)"
                 fi ;;
-            *) printf 'непонятная версия: %s vs %s\n' "$cur" "$latest"; action="skip" ;;
+            *) msgl cask.odd_version "$cur" "$latest"; action="skip" ;;
         esac
 
         if [ "$action" = "upgrade" ]; then
             if [ "$DRY_RUN" -eq 1 ]; then
-                SUMMARY="$SUMMARY\n  $token  $cur → $latest  (был бы обновлён)"
+                SUMMARY="$SUMMARY\n  $token  $cur → $latest  $(msg cask.would_upgrade)"
             else
-                dim "    снимаю закрепление и обновляю..."
+                dim "    $(msg cask.unpinning)"
                 brew unpin --cask "$token" >/dev/null 2>&1
                 if brew upgrade --cask "$token"; then
-                    ok "    $token $latest готов"
-                    SUMMARY="$SUMMARY\n  $token  $cur → $latest  обновлён"
+                    ok "    $(msgf cask.upgraded "$token" "$latest")"
+                    SUMMARY="$SUMMARY\n  $token  $cur → $latest  $(msg cask.sum_upgraded)"
                 else
-                    err "$token: brew upgrade сорвался"
-                    SUMMARY="$SUMMARY\n  $token  — ОШИБКА обновления"
+                    err "$(msgf cask.upgrade_failed "$token")"
+                    SUMMARY="$SUMMARY\n  $token  $(msg cask.sum_error)"
                     FAILED=1
                 fi
             fi
@@ -1914,14 +1966,14 @@ do_casks() {
         # было: это единственное, что удерживает brew upgrade от ежедневной
         # перекачки патчей.
         if cask_pinned "$token"; then
-            [ "$action" = "upgrade" ] && dim "    закреплён"
+            [ "$action" = "upgrade" ] && dim "    $(msg cask.pinned)"
         elif [ "$DRY_RUN" -eq 1 ]; then
-            warn "$token не закреплён — обычный запуск сделает brew pin --cask $token"
+            warn "$(msgf cask.not_pinned "$token" "$token")"
         else
             if brew pin --cask "$token" >/dev/null 2>&1; then
-                dim "    закреплён: brew upgrade его больше не тронет"
+                dim "    $(msg cask.pinned_note)"
             else
-                warn "$token: не удалось закрепить (brew pin --cask $token)"
+                warn "$(msgf cask.pin_failed "$token" "$token")"
             fi
         fi
     done
@@ -1930,14 +1982,14 @@ do_casks() {
 # ------------------------------------------------------------- список -----
 
 do_list() {
-    head1 "Установлено в $VENDOR_ROOT"
+    head1 "$(msgf list.head "$VENDOR_ROOT")"
     if [ ! -s "$STATE_FILE" ]; then
-        dim "  пусто"
+        dim "  $(msg list.empty)"
         return 0
     fi
     # printf выравнивает по байтам, а не по символам, поэтому кириллическую
     # шапку выводим literal-строкой с уже проставленными пробелами.
-    printf '  ИНСТРУМЕНТ   ВЕРСИЯ           ОБНОВЛЁН             ПУТЬ\n'
+    printf '  %s\n' "$(msg list.header)"
     while IFS=$'\t' read -r t v d; do
         [ -n "$t" ] || continue
         printf '  %-12s %-16s %-20s %s\n' "$t" "$v" "$d" "$VENDOR_ROOT/$t/$v"
@@ -1957,7 +2009,7 @@ if [ "$ONLY" = "__list__" ]; then
 fi
 
 if [ "$ONLY" = "__macports__" ]; then
-    head1 "MacPorts · готовность Intel-архивов"
+    head1 "$(msg mp.head_ready)"
     macports_rebuild_watch
     macports_check deep
     mkdir -p "$VENDOR_ROOT"
@@ -1971,10 +2023,10 @@ if [ "$ONLY" = "__bootstrap__" ]; then
 fi
 
 if [ "$ONLY" = "__preflight__" ]; then
-    head1 "Предполётная проверка Homebrew"
+    head1 "$(msg brew.head_preflight)"
     brew_preflight
     printf '\n'
-    head1 "Homebrew · кто ещё держит формулы"
+    head1 "$(msg brew.head_holders)"
     brew_orphan_watch
     exit 0
 fi
@@ -1983,10 +2035,10 @@ fi
 # было, то есть переезд новый. Гнать полный прогон вслепую не надо — сначала
 # инвентаризация, решения принимает человек (скилл brew-to-macports).
 if [ -z "$ONLY" ] && [ ! -s "$STATE_FILE" ]; then
-    warn "вендорских настроек нет — похоже, это новая машина"
-    info "  запусти сначала: $(basename "$0") --bootstrap"
-    info "  он ничего не меняет, только покажет, что куда переезжает"
-    info "  потом вернись сюда, или попроси скилл brew-to-macports провести за руку"
+    warn "$(msg fresh.warn)"
+    info "  $(msgf fresh.hint1 "$(basename "$0")")"
+    info "  $(msg fresh.hint2)"
+    info "  $(msg fresh.hint3)"
     exit 0
 fi
 
@@ -2007,9 +2059,9 @@ TOOLS="$_tools"
 
 mkdir -p "$VENDOR_ROOT" "$BIN_DIR"
 
-head1 "Вендорские бинарники · ${UNAME_M} · darwin ${DARWIN_MAJOR}"
+head1 "$(msgf vendor.head "$UNAME_M" "$DARWIN_MAJOR")"
 if [ "$DRY_RUN" -eq 1 ]; then
-    dim "режим проверки — ничего меняться не будет"
+    dim "$(msg vendor.checkmode)"
 fi
 printf '\n'
 
@@ -2019,15 +2071,15 @@ FAILED=0
 for tool in $TOOLS; do
     case " $ALL_TOOLS " in
         *" $tool "*) ;;
-        *) err "не знаю инструмент: $tool"; FAILED=1; continue ;;
+        *) err "$(msgf err.no_tool_name "$tool")"; FAILED=1; continue ;;
     esac
 
     printf '%s%-12s%s ' "$C_CYAN" "$tool" "$C_RESET"
 
     new="$(latest_version "$tool" 2>/dev/null)"
     if [ -z "$new" ]; then
-        printf '\n'; err "$tool: не удалось узнать версию у вендора"
-        SUMMARY="$SUMMARY\n  $tool  — ошибка запроса"
+        printf '\n'; err "$(msgf err.no_version "$tool")"
+        SUMMARY="$SUMMARY\n  $tool  $(msg sum.request_error)"
         FAILED=1
         continue
     fi
@@ -2036,85 +2088,85 @@ for tool in $TOOLS; do
     policy="$(version_policy "$tool")"
 
     if [ -z "$cur" ]; then
-        printf 'не установлен → %s\n' "$new"
+        printf '%s\n' "$(msgf vendor.not_present "$new")"
         action="install"
     else
         rel="$(ver_relation "$cur" "$new")"
         case "$rel" in
-            same)        printf 'уже последняя (%s)\n' "$cur"; action="skip" ;;
-            older)       printf 'у вендора %s, у нас новее (%s)\n' "$new" "$cur"; action="skip" ;;
+            same)        msgl vendor.latest "$cur"; action="skip" ;;
+            older)       msgl vendor.ours_newer "$new" "$cur"; action="skip" ;;
             newer-patch)
                 if [ "$policy" = "always" ] || [ "$INCLUDE_PATCH" -eq 1 ]; then
-                    printf '%s → %s (патч)\n' "$cur" "$new"; action="install"
+                    msgl vendor.patch "$cur" "$new"; action="install"
                 else
-                    printf '%s%s → %s — только патч, пропускаю%s\n' "$C_DIM" "$cur" "$new" "$C_RESET"
+                    printf '%s%s%s\n' "$C_DIM" "$(msgf vendor.patch_skip "$cur" "$new")" "$C_RESET"
                     action="skip"
-                    SUMMARY="$SUMMARY\n  $tool  $cur → $new  пропущен как патч (--include-patch чтобы взять)"
+                    SUMMARY="$SUMMARY\n  $tool  $cur → $new  $(msg sum.skipped_patch)"
                 fi ;;
-            newer-minor) printf '%s%s → %s (минор)%s\n' "$C_YELLOW" "$cur" "$new" "$C_RESET"; action="install" ;;
-            newer-major) printf '%s%s → %s (МАЖОР)%s\n' "$C_YELLOW" "$cur" "$new" "$C_RESET"; action="install" ;;
-            *)           printf 'непонятная версия: %s vs %s\n' "$cur" "$new"; action="skip" ;;
+            newer-minor) printf '%s%s%s\n' "$C_YELLOW" "$(msgf vendor.minor "$cur" "$new")" "$C_RESET"; action="install" ;;
+            newer-major) printf '%s%s%s\n' "$C_YELLOW" "$(msgf vendor.major "$cur" "$new")" "$C_RESET"; action="install" ;;
+            *)           msgl vendor.odd_version "$cur" "$new"; action="skip" ;;
         esac
     fi
 
     [ "$action" = "install" ] || continue
 
     if [ "$DRY_RUN" -eq 1 ]; then
-        SUMMARY="$SUMMARY\n  $tool  ${cur:-—} → $new  (был бы установлен)"
+        SUMMARY="$SUMMARY\n  $tool  ${cur:-—} → $new  $(msg sum.would_install)"
         continue
     fi
 
     dest="$VENDOR_ROOT/$tool/$new"
     if [ -d "$dest" ] && [ -d "$dest/bin" ]; then
-        dim "    версия $new уже распакована, переключаю симлинки"
+        dim "    $(msgf vendor.unpacked "$new")"
     else
         rm -rf "$dest"
-        dim "    качаю..."
+        dim "    $(msg vendor.downloading)"
         if ! install_tool "$tool" "$new" "$dest"; then
-            err "$tool: установка сорвалась, старая версия не тронута"
+            err "$(msgf err.install "$tool")"
             rm -rf "$dest"
-            SUMMARY="$SUMMARY\n  $tool  — ОШИБКА установки"
+            SUMMARY="$SUMMARY\n  $tool  $(msg sum.install_error)"
             FAILED=1
             continue
         fi
     fi
 
     if ! link_binaries "$tool" "$new"; then
-        err "$tool: не смог проставить симлинки"
-        SUMMARY="$SUMMARY\n  $tool  — ОШИБКА симлинков"
+        err "$(msgf err.symlinks "$tool")"
+        SUMMARY="$SUMMARY\n  $tool  $(msg sum.symlink_error)"
         FAILED=1
         continue
     fi
 
     state_set "$tool" "$new"
     prune_old "$tool" "$KEEP_VERSIONS"
-    ok "    $tool $new готов"
-    SUMMARY="$SUMMARY\n  $tool  ${cur:-—} → $new  установлен"
+    ok "    $(msgf vendor.ready "$tool" "$new")"
+    SUMMARY="$SUMMARY\n  $tool  ${cur:-—} → $new  $(msg sum.installed)"
 done
 
 do_casks "$CASKS"
 
-head1 "Предполётная проверка Homebrew"
+head1 "$(msg brew.head_preflight)"
 brew_preflight
 
-head1 "Homebrew · кто ещё держит формулы"
+head1 "$(msg brew.head_holders)"
 brew_orphan_watch
 
 if [ -n "$SUMMARY" ]; then
-    head1 "Итог"
+    head1 "$(msg result.head)"
     printf '%b\n' "$SUMMARY"
 else
-    head1 "Итог"
-    dim "  всё актуально, делать нечего"
+    head1 "$(msg result.head)"
+    dim "  $(msg result.nothing)"
 fi
 
 printf '\n'
 if [ -n "$PORT_BIN" ]; then
-    head1 "MacPorts · обновление портов"
+    head1 "$(msg mp.head_upgrade)"
     macports_upgrade
 fi
 
-head1 "MacPorts · слежение за Intel-архивами"
+head1 "$(msg mp.head_watch)"
 macports_rebuild_watch
 macports_watch
 
