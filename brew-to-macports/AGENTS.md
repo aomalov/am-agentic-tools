@@ -59,6 +59,13 @@ it in the other catalogues, and print it through `msg`/`msgf`/`msgl` in bash or
 `t()` in the embedded python. Keep the `%s` count identical across languages, and
 run `tests/locale-check.sh`.
 
+The catalogue format stays dependency-free on purpose. Do not move it to
+gettext, and do not make `msgfmt` required even for the tests: on the machines
+this tool exists for, installing gettext is itself a build from source, which is
+the problem the tool solves. A validator that only runs when `msgfmt` happens to
+be present is also not worth the branch — `tests/locale-check.sh` already covers
+what breaks at runtime.
+
 Two traps worth knowing. In the embedded python the translate function is named
 `t`, so never use `t` as a loop or comprehension variable — it shadows the
 function and the lookup silently stops happening. And the generated
