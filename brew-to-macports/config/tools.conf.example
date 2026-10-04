@@ -1,0 +1,43 @@
+# brew-to-macports — machine configuration
+#
+# Copy to one of these locations (first match wins):
+#   $BREW2MP_CONFIG
+#   ~/.config/brew-to-macports/tools.conf
+#   <repo>/config/tools.conf
+#
+# This is sourced as bash. Environment variables win over this file, so assign
+# with := only if you want the file to be authoritative.
+
+# ---------------------------------------------------------------- vendors ---
+# Tools the script installs from the vendor's own binary release. Each name
+# needs a latest_<tool> and install_<tool> pair in bin/upgrade-vendor-packages.sh
+# plus an entry in the architecture map, so do not invent names here — add the
+# functions first.
+ALL_TOOLS="gh go node pandoc yt-dlp terraform ffmpeg deno resvg gws gcloud"
+
+# ------------------------------------------------------------------ casks ---
+# Homebrew casks that stay in brew but are upgraded on MAJOR changes only.
+# They are held with `brew pin`, so plain `brew upgrade` never touches them;
+# this script unpins, upgrades, and pins again. Use it for apps that ship a
+# full-size installer on almost every patch release, where each patch means
+# re-downloading the whole thing. Leave empty if you have none.
+MAJOR_ONLY_CASKS=""
+
+# -------------------------------------------------------------- locations ---
+# VENDOR_ROOT="$HOME/.local/vendor"
+# VENDOR_BIN_DIR="$HOME/.local/bin"
+
+# How many old versions of each tool to keep for --rollback.
+# KEEP_VERSIONS=2
+
+# Interpreter for the embedded report code. Apple's system python is the
+# default on purpose: it exists on every macOS, and the embedded snippets are
+# deliberately kept 3.9-compatible so the script also runs on older releases.
+# PY=/usr/bin/python3
+
+# ------------------------------------------------------- MacPorts watchlist --
+# Extra "port:brew-formula-it-replaces" pairs to watch for an Intel archive.
+# The script rebuilds its own list from what is installed, so this is only for
+# ports you want tracked before the matching formula exists locally.
+# MACPORTS_WATCH="librsvg:librsvg
+# imagemagick:imagemagick"
