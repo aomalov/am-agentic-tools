@@ -280,3 +280,5 @@ pip.no_module     = `python3 -m pip` не работает — у этого и�
 pip.no_module_mp  = у питона из MacPorts pip лежит отдельным портом: sudo port -b install py%s-pip
 pip.using         = беру: %s (python %s)
 pip.using_other   = это НЕ тот интерпретатор, на который указывает python3
+pip.bad_name      = это не имя пакета, в pip не передаю: %s
+pip.name_rule     = допустимо: буквы, цифры, . _ - и спецификатор версии вида pkg==1.2

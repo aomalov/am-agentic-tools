@@ -281,3 +281,5 @@ pip.no_module     = `python3 -m pip` does not work — this interpreter has no p
 pip.no_module_mp  = a MacPorts python keeps pip in its own port: sudo port -b install py%s-pip
 pip.using         = using: %s (python %s)
 pip.using_other   = that is NOT the interpreter python3 points at
+pip.bad_name      = not a package name, refusing to pass it to pip: %s
+pip.name_rule     = allowed: letters, digits, . _ - and a version specifier like pkg==1.2

