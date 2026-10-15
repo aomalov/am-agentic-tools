@@ -55,6 +55,32 @@ sends you to `--bootstrap` rather than acting blindly.
 | `--include-patch` | take patch releases too (default policy is MAJOR/MINOR) |
 | `--rollback node` | go back to the previous version |
 | `--list` | what is installed now |
+| `--wheels pkg[,pkg]` | would pip build this from source? resolves the closure, installs nothing |
+
+## The fourth route: python wheels
+
+`pip install` is the quietest hazard of all, and it sits outside the three steps
+above. pip takes the newest version of a package, and if that version has no
+wheel for this platform it downloads the sdist and compiles — without asking.
+`cryptography` is the live example: from 49.0.0 its macOS wheels are arm64-only,
+so on Intel the newest version builds through `maturin`, which means Rust.
+
+The fix is an environment variable, not a pin:
+
+```sh
+export PIP_ONLY_BINARY=:all:
+```
+
+pip then refuses to compile and backtracks to a version that has a wheel — for
+`cryptography` it picks 48.0.1 on its own. A pin in `requirements.txt` works too
+but goes stale the moment upstream ships an x86_64 wheel again, while the flag
+picks it up. The trade-off is deliberate: a package with no wheels at all now
+fails loudly instead of building for an hour. Override per command with
+`--no-binary :none:`.
+
+`--wheels <pkg>` checks a package before you need it. It resolves the whole
+closure with wheels only, installs nothing, and reports which version pip had to
+step back to.
 
 ## How it decides
 

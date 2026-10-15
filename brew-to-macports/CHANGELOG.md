@@ -29,6 +29,11 @@ First published version, extracted from a complete migration off Homebrew.
   Language comes from `BREW2MP_LANG` or the usual locale variables; English is
   the base layer, so an untranslated key falls back instead of blanking a line.
   No gettext and no bash 4 required. Ships English and Russian.
+- `--wheels <pkg>`: resolves a package closure with wheels only and reports what
+  pip would otherwise compile. Plus a python-wheel section in the preflight that
+  checks whether `PIP_ONLY_BINARY` is in effect and whether `pip3` belongs to the
+  same interpreter `python3` points at — it does not, on the machine this was
+  written on, and that silently installs packages into the wrong python.
 - Thin agent orchestrator in `skills/brew-to-macports/`.
 - `config/tools.conf.example`, `install.sh`, `docs/GOTCHAS.md`, `AGENTS.md`,
   and two tests: `tests/py39-compat.sh` and `tests/locale-check.sh`.

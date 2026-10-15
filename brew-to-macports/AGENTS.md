@@ -27,6 +27,15 @@ It reports exactly what would be built from source and flags heavy toolchains.
 3. **Homebrew, last resort, with explicit approval**, after stating what will be
    built and roughly how long it takes.
 
+## pip is a fourth route, and the quietest
+
+`pip install` compiles from source without asking when the newest version has no
+wheel for this platform. Keep `PIP_ONLY_BINARY=:all:` in the environment so pip
+backtracks to a version that has one instead of building. Check before you
+install with `--wheels <pkg>`, and never recommend `python3 -m pip` without
+confirming that interpreter actually has pip — a MacPorts python keeps it in a
+separate port.
+
 ## Verify, do not assume
 
 - Check MacPorts archives by **exact** name, never "is there any archive". See

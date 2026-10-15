@@ -258,3 +258,26 @@ bs.risky2         = Pin them until a replacement is found:
 bs.cask_pulls     = casks that pull formulae — their migration is blocked by the cask, not the formula:
 bs.order1         = Order: step 1 first, then 2, and only what is left — step 3.
 bs.order2         = After each step check that the tool works, and only then remove it from brew.
+
+# ---------------------------------------------------------- python wheels ---
+pip.head          = Python wheels
+pip.no_pip        = no pip found — nothing to check
+pip.interp        = interpreter: %s (%s)
+pip.pip_is        = pip:          %s
+pip.mismatch      = pip belongs to a DIFFERENT interpreter than python3
+pip.mismatch_hint = install with `python3 -m pip`, otherwise packages land in the wrong place
+pip.guard_on      = PIP_ONLY_BINARY=%s — pip will not compile
+pip.guard_off     = PIP_ONLY_BINARY is not set — pip may silently build from source
+pip.guard_hint    = set it in ~/.zshenv: export PIP_ONLY_BINARY=:all:
+pip.guard_why     = without it pip takes the newest version, and if that has no wheel
+pip.guard_why2    = for this platform it downloads the sdist and compiles — sometimes Rust
+pip.resolving     = resolving %s with wheels only...
+pip.all_wheels    = the whole closure installs from wheels, packages: %s
+pip.backtracked   = pip had to step back from the newest version:
+pip.would_build   = no wheel for this platform — pip would compile:
+pip.check_hint    = check a package before you need it: %s --wheels <pkg>[,<pkg>]
+usage.wheels    = will pip build this package from source?
+pip.no_module     = `python3 -m pip` does not work — this interpreter has no pip
+pip.no_module_mp  = a MacPorts python keeps pip in its own port: sudo port -b install py%s-pip
+pip.using         = using: %s (python %s)
+pip.using_other   = that is NOT the interpreter python3 points at

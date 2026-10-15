@@ -106,6 +106,7 @@ DRY_RUN=0
 INCLUDE_PATCH=0
 ONLY=""
 ROLLBACK=""
+WHEELS=""
 
 usage() {
     local n="upgrade_vendor_packages"
@@ -120,6 +121,7 @@ usage() {
     printf '  %-40s %s\n' "$n --preflight"       "$(msg usage.preflight)"
     printf '  %-40s %s\n' "$n --macports"        "$(msg usage.macports)"
     printf '  %-40s %s\n' "$n --bootstrap"       "$(msg usage.bootstrap)"
+    printf '  %-40s %s\n' "$n --wheels pkg"      "$(msg usage.wheels)"
     printf '\n'
     printf '%-14s%s\n' "$(msg usage.tools)"  "$ALL_TOOLS"
     printf '%-14s%s   %s\n' "$(msg usage.prefix)" "$VENDOR_ROOT" "$(msgf usage.symlinks "$BIN_DIR")"
@@ -139,6 +141,7 @@ while [ $# -gt 0 ]; do
         -n|--check|--dry-run) DRY_RUN=1 ;;
         --include-patch)      INCLUDE_PATCH=1 ;;
         --bootstrap)          ONLY="__bootstrap__" ;;
+        --wheels)             ONLY="__wheels__"; WHEELS="${2:?--wheels needs a package list}"; shift ;;
         --only)               ONLY="$(printf '%s' "${2:-}" | tr ',' ' ')"; shift ;;
         --only=*)             ONLY="$(printf '%s' "${1#*=}" | tr ',' ' ')" ;;
         --rollback)           ROLLBACK="${2:-}"; shift ;;
@@ -1624,6 +1627,148 @@ elif not roots and not by_cask:
 PYEOF
 }
 
+# ------------------------------------------------------- питоновские колёса -
+#
+# Четвёртый маршрут установки, которого нет в тройке вендор → MacPorts → brew,
+# и самый тихий из всех. `pip install` берёт самую свежую версию пакета, и если
+# колеса под эту платформу у неё нет — скачивает sdist и начинает компилировать,
+# ничего не спросив.
+#
+# Повод: у cryptography macOS-колёса с версии 49.0.0 стали arm64-only, и на
+# Intel свежая версия уехала собираться через maturin, то есть через Rust —
+# ровно тот же класс, что librsvg в brew.
+#
+# Лечение — PIP_ONLY_BINARY=:all: в окружении. Тогда pip вместо сборки
+# откатывается на версию, у которой колесо есть (для cryptography он сам
+# выбирает 48.0.1 с cp311-abi3-universal2). Это лучше пина в requirements: пин
+# устареет, когда апстрим вернёт x86_64-колесо, а флаг подхватит его сам.
+
+# Печатает команду, которой реально можно разрешать пакеты, и ничего больше.
+# Порядок: сначала pip того питона, что отвечает на python3 (так пакеты лягут
+# туда, куда ожидаешь), потом любой pip из PATH, потом фреймворковые.
+pip_cmd() {
+    local py c
+    py="$(command -v python3 2>/dev/null)"
+    if [ -n "$py" ] && "$py" -m pip --version >/dev/null 2>&1; then
+        printf '%s -m pip' "$py"; return 0
+    fi
+    for c in "$(command -v pip3 2>/dev/null)" \
+             /usr/local/bin/pip3 \
+             /Library/Frameworks/Python.framework/Versions/Current/bin/pip3; do
+        [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
+    done
+    return 1
+}
+
+pip_preflight() {
+    local py pip_path pip_py
+    py="$(command -v python3 2>/dev/null)"
+    pip_path="$(command -v pip3 2>/dev/null)"
+    [ -n "$py" ] || [ -n "$pip_path" ] || { dim "  $(msg pip.no_pip)"; return 0; }
+
+    [ -n "$py" ] && printf '  %s\n' "$(msgf pip.interp "$py" "$("$py" -V 2>&1)")"
+    if [ -n "$pip_path" ]; then
+        printf '  %s\n' "$(msgf pip.pip_is "$pip_path")"
+        # pip3 на этой машине оказался из другого питона, чем python3: один из
+        # MacPorts, другой из python.org-фреймворка. Пакеты тогда ставятся не в
+        # тот интерпретатор, который отвечает на python3.
+        pip_py="$("$pip_path" -V 2>/dev/null | sed -n 's/.*(python \([0-9.]*\)).*/\1/p')"
+        if [ -n "$pip_py" ] && [ -n "$py" ]; then
+            case "$("$pip_path" -V 2>/dev/null)" in
+                *"$(dirname "$(dirname "$py")")"*) ;;
+                *) warn "  $(msg pip.mismatch)"
+                   # Совет "ставь через python3 -m pip" годится только если у
+                   # этого интерпретатора pip вообще есть. У питона из MacPorts
+                   # он отдельным портом, и без проверки совет был бы ложным.
+                   if "$py" -m pip --version >/dev/null 2>&1; then
+                       dim "    $(msg pip.mismatch_hint)"
+                   else
+                       warn "    $(msg pip.no_module)"
+                       case "$py" in
+                           "$MP_PREFIX"/*|/opt/local/*)
+                               dim "    $(msgf pip.no_module_mp \
+                                          "$("$py" -c 'import sys; print("%d%d" % sys.version_info[:2])' 2>/dev/null)")" ;;
+                       esac
+                   fi ;;
+            esac
+        fi
+    fi
+
+    if [ -n "${PIP_ONLY_BINARY:-}" ]; then
+        ok "  $(msgf pip.guard_on "$PIP_ONLY_BINARY")"
+    else
+        warn "  $(msg pip.guard_off)"
+        dim  "    $(msg pip.guard_why)"
+        dim  "    $(msg pip.guard_why2)"
+        dim  "    $(msg pip.guard_hint)"
+    fi
+    dim "  $(msgf pip.check_hint "$(basename "$0")")"
+}
+
+# --wheels <пакеты>: что pip соберёт из исходников, если дать ему волю.
+#
+# Разрешаем замыкание дважды — с запретом на сборку и без — и сравниваем
+# выбранные версии. Расхождение означает, что без флага pip взял бы версию без
+# колеса и пошёл компилировать. Ничего не устанавливается: только download в
+# временный каталог.
+wheels_check() {
+    local pkgs="$1" PIPC tmp pyver
+    PIPC="$(pip_cmd)" || { err "$(msg pip.no_pip)"; return 1; }
+    pyver="$($PIPC --version 2>/dev/null | sed -n 's/.*(python \([0-9.]*\)).*/\1/p')"
+    dim "  $(msgf pip.using "$PIPC" "${pyver:-?}")"
+    case "$PIPC" in
+        "$(command -v python3 2>/dev/null) -m pip") ;;
+        *) warn "  $(msg pip.using_other)" ;;
+    esac
+
+    tmp="$(mktemp -d)"
+    dim "  $(msgf pip.resolving "$pkgs")"
+
+    # bash -c: zsh не делает word splitting, и список пакетов пришёл бы одной
+    # строкой. Та же причина, по которой в этом скрипте все циклы по спискам
+    # завёрнуты в bash.
+    local list
+    list="$(printf '%s' "$pkgs" | tr ',' ' ')"
+
+    # PIP_ONLY_BINARY снимаем явно: иначе унаследованное окружение подменит
+    # смысл обеих половин сравнения.
+    if ! PIP_ONLY_BINARY= $PIPC download --only-binary=:all: \
+            -d "$tmp/bin" $list >"$tmp/log.bin" 2>&1; then
+        err "$(msg pip.would_build)"
+        grep -iE "could not find a version|no matching distribution" "$tmp/log.bin" \
+            | sed 's/^/    /' | head -5
+        rm -rf "$tmp"; return 1
+    fi
+
+    local n
+    n="$(find "$tmp/bin" -name '*.whl' -o -name '*.tar.gz' 2>/dev/null | grep -c . || true)"
+    ok "  $(msgf pip.all_wheels "$n")"
+
+    # Какие версии pip взял бы без запрета — сравниваем только по именам файлов,
+    # ничего не собирая: --no-deps --no-build-isolation не нужны, достаточно
+    # посмотреть, что предлагает индекс без ограничения на формат.
+    PIP_ONLY_BINARY= $PIPC download --no-deps -d "$tmp/any" $list \
+        >"$tmp/log.any" 2>&1 || true
+    local differ=""
+    local f base name ver newest
+    for f in "$tmp/bin"/*.whl; do
+        [ -e "$f" ] || continue
+        base="$(basename "$f")"
+        name="${base%%-*}"
+        ver="$(printf '%s' "$base" | cut -d- -f2)"
+        newest="$(grep -oiE "${name}-[0-9][^ /]*\.(whl|tar\.gz)" "$tmp/log.any" 2>/dev/null \
+                  | head -1 | cut -d- -f2)"
+        if [ -n "$newest" ] && [ "$newest" != "$ver" ]; then
+            differ="$differ\n    $name  $newest → $ver"
+        fi
+    done
+    if [ -n "$differ" ]; then
+        warn "  $(msg pip.backtracked)"
+        printf '%b\n' "$differ"
+    fi
+    rm -rf "$tmp"
+}
+
 # --------------------------------------------- --bootstrap: новый переезд ---
 #
 # Режим первого знакомства с машиной. Ничего не меняет — только инвентаризует
@@ -2017,6 +2162,12 @@ if [ "$ONLY" = "__macports__" ]; then
     exit 0
 fi
 
+if [ "$ONLY" = "__wheels__" ]; then
+    head1 "$(msg pip.head)"
+    wheels_check "$WHEELS"
+    exit $?
+fi
+
 if [ "$ONLY" = "__bootstrap__" ]; then
     bootstrap_report
     exit 0
@@ -2028,6 +2179,9 @@ if [ "$ONLY" = "__preflight__" ]; then
     printf '\n'
     head1 "$(msg brew.head_holders)"
     brew_orphan_watch
+    printf '\n'
+    head1 "$(msg pip.head)"
+    pip_preflight
     exit 0
 fi
 
@@ -2151,6 +2305,9 @@ brew_preflight
 
 head1 "$(msg brew.head_holders)"
 brew_orphan_watch
+
+head1 "$(msg pip.head)"
+pip_preflight
 
 if [ -n "$SUMMARY" ]; then
     head1 "$(msg result.head)"

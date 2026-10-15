@@ -257,3 +257,26 @@ bs.risky2         = Закрепи их, пока не нашлась замен
 bs.cask_pulls     = cask'и, тянущие формулы — их переезд упирается в cask, а не в формулу:
 bs.order1         = Порядок: сначала пункт 1, потом 2, и только то, что осталось — пункт 3.
 bs.order2         = После каждого шага проверяй, что инструмент работает, и только потом сноси из brew.
+
+# ------------------------------------------------- питоновские колёса -------
+pip.head          = Питоновские колёса
+pip.no_pip        = pip не найден — проверять нечего
+pip.interp        = интерпретатор: %s (%s)
+pip.pip_is        = pip:           %s
+pip.mismatch      = pip принадлежит ДРУГОМУ интерпретатору, чем python3
+pip.mismatch_hint = ставь через `python3 -m pip`, иначе пакеты лягут не туда
+pip.guard_on      = PIP_ONLY_BINARY=%s — pip компилировать не станет
+pip.guard_off     = PIP_ONLY_BINARY не задан — pip может молча собрать из исходников
+pip.guard_hint    = пропиши в ~/.zshenv: export PIP_ONLY_BINARY=:all:
+pip.guard_why     = без него pip берёт самую свежую версию, и если у неё нет колеса
+pip.guard_why2    = под эту платформу — качает sdist и компилирует, иногда через Rust
+pip.resolving     = разрешаю %s только по колёсам...
+pip.all_wheels    = всё замыкание ставится колёсами, пакетов: %s
+pip.backtracked   = pip пришлось отступить от самой свежей версии:
+pip.would_build   = колеса под эту платформу нет — pip стал бы компилировать:
+pip.check_hint    = проверить пакет заранее: %s --wheels <пакет>[,<пакет>]
+usage.wheels    = соберёт ли pip этот пакет из исходников
+pip.no_module     = `python3 -m pip` не работает — у этого интерпретатора нет pip
+pip.no_module_mp  = у питона из MacPorts pip лежит отдельным портом: sudo port -b install py%s-pip
+pip.using         = беру: %s (python %s)
+pip.using_other   = это НЕ тот интерпретатор, на который указывает python3
