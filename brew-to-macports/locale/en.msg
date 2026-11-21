@@ -65,6 +65,7 @@ vendor.major       = %s → %s (MAJOR)
 vendor.odd_version = cannot compare versions: %s vs %s
 vendor.unpacked    = version %s is already unpacked, switching the symlinks
 vendor.downloading = downloading...
+vendor.source_down = %s: the vendor download is unreachable, skipping — staying on %s, will retry next run
 vendor.ready       = %s %s ready
 vendor.gcloud_inplace = upgrading in place through gcloud components update
 
@@ -74,6 +75,7 @@ sum.installed     = installed
 sum.skipped_patch = skipped as a patch (--include-patch to take it)
 sum.request_error = — request failed
 sum.install_error = — INSTALL FAILED
+sum.source_down   = — vendor source unreachable, will retry
 sum.symlink_error = — SYMLINK FAILED
 
 # ----------------------------------------------------------------- shim -----

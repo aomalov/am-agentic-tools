@@ -172,7 +172,10 @@ need() { command -v "$1" >/dev/null 2>&1 || { err "$(msgf err.no_tool "$1")"; ex
 need curl; need unzip; need tar
 [ -x "$PY" ] || { err "$(msgf err.no_py "$PY")"; exit 1; }
 
-fetch() { curl -fsSL --max-time 60 "$@"; }
+# --connect-timeout отдельно от --max-time: мёртвый хост должен выясняться за
+# секунды, а не съедать весь бюджет на скачивание. Иначе каждый прогон стоит
+# минуту на зеркале, о котором уже известно, что оно лежит.
+fetch() { curl -fsSL --connect-timeout 15 --max-time 60 "$@"; }
 
 gh_json() {
     local tok="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
@@ -481,8 +484,14 @@ install_ffmpeg() {
             # выглядит как наша проблема, а лежит чужое зеркало.
             loc="$(curl -sSI --max-time 20 "$url" 2>/dev/null \
                    | awk 'tolower($1) == "location:" { print $2 }' | tr -d '\r' | tail -1)"
-            [ -n "$loc" ] && warn "$(msgf warn.ffmpeg_mirror "${loc%%/pub/*}")"
-            rm -rf "$tmp"; return 1
+            rm -rf "$tmp"
+            # 3 — источник недоступен: это не наша поломка, а чужое зеркало,
+            # поэтому основной цикл покажет пропуск, а не провал установки.
+            if [ -n "$loc" ]; then
+                warn "$(msgf warn.ffmpeg_mirror "${loc%%/pub/*}")"
+                return 3
+            fi
+            return 1
         fi
         verify_gpg "$tmp/$b.zip" "$tmp/$b.zip.sig" "$EVERMEET_KEY" "$EVERMEET_FPR"; rc=$?
         if [ $rc -ne 0 ]; then
@@ -2374,7 +2383,15 @@ for tool in $TOOLS; do
     else
         rm -rf "$dest"
         dim "    $(msg vendor.downloading)"
-        if ! install_tool "$tool" "$new" "$dest"; then
+        install_tool "$tool" "$new" "$dest"; rc=$?
+        if [ $rc -eq 3 ]; then
+            # Источник у вендора лежит. Старая версия на месте, следующий
+            # прогон попробует снова — это пропуск, а не ошибка.
+            rm -rf "$dest"
+            printf '%s%s%s\n' "$C_YELLOW" "    $(msgf vendor.source_down "$tool" "$cur")" "$C_RESET"
+            SUMMARY="$SUMMARY\n  $tool  ${cur:-—} → $new  $(msg sum.source_down)"
+            continue
+        elif [ $rc -ne 0 ]; then
             err "$(msgf err.install "$tool")"
             rm -rf "$dest"
             SUMMARY="$SUMMARY\n  $tool  $(msg sum.install_error)"

@@ -26,6 +26,13 @@
 - A failed ffmpeg download now names the host the redirect leads to. Before,
   `curl: (28)` looked like a local network problem, while the mirror was down.
 - `install_ffmpeg` left its temporary directory behind on every failure path.
+- A dead vendor host took a full minute to time out on every run, because
+  `fetch` had only `--max-time 60`. It now also has `--connect-timeout 15`, so an
+  unreachable host is caught in seconds while a slow download keeps its minute.
+- An unreachable vendor download is now a skip, not a failure: a yellow line,
+  `vendor source unreachable, will retry` in the summary, and exit code 0. The
+  old version stays, and the next run tries again. Real install failures,
+  including a bad signature, still print ✗ and exit 1.
 
 ## 0.1.0 — 2026-10-04
 

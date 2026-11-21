@@ -64,6 +64,7 @@ vendor.major       = %s → %s (МАЖОР)
 vendor.odd_version = непонятная версия: %s vs %s
 vendor.unpacked    = версия %s уже распакована, переключаю симлинки
 vendor.downloading = качаю...
+vendor.source_down = %s: скачивание у вендора недоступно, пропускаю — остаюсь на %s, попробую в следующий раз
 vendor.ready       = %s %s готов
 vendor.gcloud_inplace = обновляю на месте через gcloud components update
 
@@ -73,6 +74,7 @@ sum.installed     = установлен
 sum.skipped_patch = пропущен как патч (--include-patch чтобы взять)
 sum.request_error = — ошибка запроса
 sum.install_error = — ОШИБКА установки
+sum.source_down   = — источник у вендора недоступен, попробую снова
 sum.symlink_error = — ОШИБКА симлинков
 
 # ----------------------------------------------------------------- shim -----
