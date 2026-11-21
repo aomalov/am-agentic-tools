@@ -434,9 +434,37 @@ install_terraform() {
     rm -rf "$tmp"
 }
 
+# Проверка отсоединённой подписи по ЗАКРЕПЛЁННОМУ ключу. Связка собирается
+# только из файла ключа, личный ~/.gnupg не участвует, и принимается лишь
+# подпись, чей первичный ключ совпадает с fpr. Код возврата: 0 — подпись
+# верна, 1 — нет, 2 — нечем проверять (нет gpg/gpgv).
+verify_gpg() {
+    local file="$1" sig="$2" keyfile="$3" fpr="$4" kr st
+    command -v gpg >/dev/null 2>&1 && command -v gpgv >/dev/null 2>&1 || return 2
+    [ -f "$file" ] && [ -f "$sig" ] && [ -f "$keyfile" ] || return 1
+    kr="$(mktemp)"
+    if ! gpg --batch --yes --dearmor -o "$kr" "$keyfile" 2>/dev/null; then
+        rm -f "$kr"; return 1
+    fi
+    st="$(gpgv --status-fd 1 --keyring "$kr" "$sig" "$file" 2>/dev/null)"
+    rm -f "$kr"
+    printf '%s\n' "$st" | awk -v f="$fpr" '
+        $1 == "[GNUPG:]" && $2 == "VALIDSIG" && $NF == f { ok = 1 }
+        END { exit !ok }'
+}
+
 # evermeet.cx собирает статический ffmpeg только под Intel.
+#
+# С ноября 2026 evermeet.cx отдаёт каждое скачивание редиректом на сторонний
+# хост (e.deolaha.ca:4242), о котором на сайте ни слова. Поэтому архив ставится
+# только после проверки подписи .sig ключом автора, закреплённым в репозитории
+# (keys/, отпечаток сверен с keys.openpgp.org): откуда бы ни пришли байты,
+# чужой бинарник в ~/.local/bin не попадёт.
+EVERMEET_FPR="20F6EA3E0CFD6B4C53447A73476C4B611A660874"
+EVERMEET_KEY="$ROOT_DIR/keys/evermeet-ffmpeg-1A660874.asc"
+
 install_ffmpeg() {
-    local v="$1" dest="$2" tmp b bv
+    local v="$1" dest="$2" tmp b bv url loc rc
     if [ "$UNAME_M" != "x86_64" ]; then
         err "$(msgf err.ffmpeg_arch "$UNAME_M")"
         return 1
@@ -445,9 +473,23 @@ install_ffmpeg() {
     mkdir -p "$dest/bin"
     for b in ffmpeg ffprobe; do
         bv="$(fetch "https://evermeet.cx/ffmpeg/info/$b/release" \
-              | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["version"])')" || return 1
-        fetch -o "$tmp/$b.zip" "https://evermeet.cx/ffmpeg/${b}-${bv}.zip" || return 1
-        unzip -qq -o "$tmp/$b.zip" -d "$dest/bin" || return 1
+              | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["version"])')" \
+            || { rm -rf "$tmp"; return 1; }
+        url="https://evermeet.cx/ffmpeg/${b}-${bv}.zip"
+        if ! fetch -o "$tmp/$b.zip" "$url" || ! fetch -o "$tmp/$b.zip.sig" "$url.sig"; then
+            # Сказать, куда на самом деле ведёт скачивание: голый таймаут curl
+            # выглядит как наша проблема, а лежит чужое зеркало.
+            loc="$(curl -sSI --max-time 20 "$url" 2>/dev/null \
+                   | awk 'tolower($1) == "location:" { print $2 }' | tr -d '\r' | tail -1)"
+            [ -n "$loc" ] && warn "$(msgf warn.ffmpeg_mirror "${loc%%/pub/*}")"
+            rm -rf "$tmp"; return 1
+        fi
+        verify_gpg "$tmp/$b.zip" "$tmp/$b.zip.sig" "$EVERMEET_KEY" "$EVERMEET_FPR"; rc=$?
+        if [ $rc -ne 0 ]; then
+            if [ $rc -eq 2 ]; then err "$(msg err.ffmpeg_nogpg)"; else err "$(msgf err.ffmpeg_sig "$b-$bv.zip")"; fi
+            rm -rf "$tmp"; return 1
+        fi
+        unzip -qq -o "$tmp/$b.zip" -d "$dest/bin" || { rm -rf "$tmp"; return 1; }
         chmod +x "$dest/bin/$b"
     done
     rm -rf "$tmp"

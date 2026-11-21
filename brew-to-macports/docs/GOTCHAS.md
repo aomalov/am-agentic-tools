@@ -18,6 +18,29 @@ name from `port info --version --revision` plus the **default** variants from
 Corollary: run `sudo port selfupdate` first. A stale ports tree asks for a
 version the mirror does not have, and that alone sends the port off to compile.
 
+## `port install` upgrades the dependencies you already have
+
+Checking exact archives for the dependencies that are **missing** is not
+enough. Before installing, `port install` upgrades every installed-but-outdated
+port in the tree (`Upgrading already installed dependencies of ffmpeg`), and
+with `-b` the first one without an archive aborts the whole run halfway: eight
+dependencies were already upgraded, `gnutls` had no `darwin_25.x86_64` archive
+(403), and ffmpeg itself never got installed. Check the intersection of
+`port rdeps --no-build <port>` with `port outdated` as well.
+
+`-n` (do not upgrade dependencies) only hides this: the port's archive was built
+against the newer libraries, so running it on the old ones is a gamble.
+
+## A vendor download can be redirected anywhere
+
+`fetch` follows redirects (`curl -L`). In November 2026 evermeet.cx started
+answering every ffmpeg download with a 302 to an unannounced third-party host on
+port 4242, which then stopped answering: a week of `curl: (28)` that looked like
+a local network problem. The host check would not have helped — any host can
+serve any bytes — so ffmpeg is now installed only after its `.sig` verifies
+against the author's key pinned in `keys/` (fingerprint cross-checked with
+keys.openpgp.org), and a failed download names the host it was sent to.
+
 ## A non-default variant changes the archive name
 
 `gnupg2` failed with a 404 on archivefetch. The local tree defaulted to

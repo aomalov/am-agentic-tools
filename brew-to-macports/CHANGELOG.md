@@ -10,6 +10,23 @@
   binary. The version policy is `always`, because bun stays on 1.x for months
   and its fixes ship as patches.
 
+### Security
+
+- ffmpeg is installed only after its `.sig` verifies against the evermeet.cx
+  signing key, which is pinned in `keys/` (fingerprint
+  `20F6EA3E0CFD6B4C53447A73476C4B611A660874`, cross-checked with
+  keys.openpgp.org). Verification uses only that key file and accepts only a
+  signature whose primary key matches the fingerprint. Without gpg/gpgv, the
+  install refuses to proceed rather than skipping the check. evermeet.cx now
+  redirects every download to an unannounced third-party host, so the signature
+  is what links the binary to its author.
+
+### Fixed
+
+- A failed ffmpeg download now names the host the redirect leads to. Before,
+  `curl: (28)` looked like a local network problem, while the mirror was down.
+- `install_ffmpeg` left its temporary directory behind on every failure path.
+
 ## 0.1.0 — 2026-10-04
 
 First published version, extracted from a complete migration off Homebrew.
