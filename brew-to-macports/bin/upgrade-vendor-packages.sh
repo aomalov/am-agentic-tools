@@ -57,7 +57,7 @@ export I18N_LIB="$LIB_DIR"
 
 # Инструменты, которые скрипт умеет ставить из официальных бинарников вендора.
 # Переопределяется в конфиге (см. ниже).
-ALL_TOOLS="${ALL_TOOLS:-gh go node pandoc yt-dlp terraform ffmpeg deno resvg gws gcloud}"
+ALL_TOOLS="${ALL_TOOLS:-gh go node pandoc yt-dlp terraform ffmpeg deno resvg gws gcloud bun}"
 
 # Приложения, которые остаются в Homebrew, но обновляются только на смене
 # MAJOR. Держатся закреплёнными (brew pin), чтобы brew upgrade не тянул
@@ -161,8 +161,8 @@ UNAME_M="$(uname -m)"
 DARWIN_MAJOR="$(uname -r | cut -d. -f1)"
 
 case "$UNAME_M" in
-    x86_64) A_GO=amd64; A_GH=amd64; A_NODE=x64;   A_PANDOC=x86_64; A_TF=amd64; A_DENO=x86_64;  A_RESVG=x86_64;  A_GWS=x86_64;  A_GCLOUD=x86_64 ;;
-    arm64)  A_GO=arm64; A_GH=arm64; A_NODE=arm64; A_PANDOC=arm64;  A_TF=arm64; A_DENO=aarch64; A_RESVG=aarch64; A_GWS=aarch64; A_GCLOUD=arm    ;;
+    x86_64) A_GO=amd64; A_GH=amd64; A_NODE=x64;   A_PANDOC=x86_64; A_TF=amd64; A_DENO=x86_64;  A_RESVG=x86_64;  A_GWS=x86_64;  A_GCLOUD=x86_64; A_BUN=x64     ;;
+    arm64)  A_GO=arm64; A_GH=arm64; A_NODE=arm64; A_PANDOC=arm64;  A_TF=arm64; A_DENO=aarch64; A_RESVG=aarch64; A_GWS=aarch64; A_GCLOUD=arm;    A_BUN=aarch64 ;;
     *)      err "$(msgf err.unknown_arch "$UNAME_M")"; exit 1 ;;
 esac
 
@@ -332,6 +332,17 @@ latest_gcloud() {
     fetch https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json \
         | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["version"])'
 }
+# bun нужен как раннер тестов для репозиториев, которые на нём и собраны
+# (bun test, bun:test). Формула в brew под Intel собирается из исходников и
+# тянет за собой zig и llvm, то есть ровно тот сценарий, от которого весь этот
+# скрипт и заведён. Upstream выкладывает готовый darwin-x64.
+#
+# Тег у bun не "v1.4.2", а "bun-v1.4.2", поэтому срезаем префикс целиком,
+# а не одну букву: lstrip тут не годится — он сгрыз бы и цифры.
+latest_bun() {
+    gh_json https://api.github.com/repos/oven-sh/bun/releases/latest \
+        | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["tag_name"].removeprefix("bun-v"))'
+}
 latest_ffmpeg() {
     fetch https://evermeet.cx/ffmpeg/info/ffmpeg/release \
         | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["version"])'
@@ -350,6 +361,7 @@ latest_version() {
         resvg)     latest_resvg ;;
         gws)       latest_gws ;;
         gcloud)    latest_gcloud ;;
+        bun)       latest_bun ;;
     esac
 }
 
@@ -360,6 +372,9 @@ version_policy() {
         yt-dlp) echo always ;;
         # gws ещё на 0.x: мажор и минор заморожены, вся жизнь идёт в патче.
         gws)    echo always ;;
+        # bun сидит на 1.x месяцами, а правки рантайма и bun test выходят
+        # патчами. С политикой minor он бы не обновился почти никогда.
+        bun)    echo always ;;
         *)      echo minor ;;
     esac
 }
@@ -446,6 +461,25 @@ install_deno() {
     mkdir -p "$dest/bin"
     unzip -qq -o "$tmp/a.zip" -d "$dest/bin" || return 1
     chmod +x "$dest/bin/deno"
+    rm -rf "$tmp"
+}
+
+# В архиве bun лежит не голый бинарник, а каталог bun-darwin-<arch>/bun,
+# поэтому распаковываем во временный каталог и переносим уже сам файл —
+# иначе в ~/.local/bin ушёл бы симлинк на каталог.
+#
+# Берём обычную сборку, не -baseline: baseline собран без AVX2 для машин
+# старше Haswell, а здесь AVX2 есть. Если архива на обычную сборку не
+# окажется, fetch вернёт ошибку, и это лучше тихой подмены на медленную.
+install_bun() {
+    local v="$1" dest="$2" tmp
+    tmp="$(mktemp -d)"
+    fetch -o "$tmp/a.zip" \
+        "https://github.com/oven-sh/bun/releases/download/bun-v${v}/bun-darwin-${A_BUN}.zip" || return 1
+    unzip -qq -o "$tmp/a.zip" -d "$tmp/x" || return 1
+    mkdir -p "$dest/bin"
+    mv "$tmp/x/bun-darwin-${A_BUN}/bun" "$dest/bin/bun" || return 1
+    chmod +x "$dest/bin/bun"
     rm -rf "$tmp"
 }
 
@@ -627,6 +661,7 @@ install_tool() {
         resvg)     install_resvg     "$2" "$3" ;;
         gws)       install_gws       "$2" "$3" ;;
         gcloud)    install_gcloud    "$2" "$3" ;;
+        bun)       install_bun       "$2" "$3" ;;
     esac
 }
 

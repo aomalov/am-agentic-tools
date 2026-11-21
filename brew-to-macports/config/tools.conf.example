@@ -13,7 +13,7 @@
 # needs a latest_<tool> and install_<tool> pair in bin/upgrade-vendor-packages.sh
 # plus an entry in the architecture map, so do not invent names here — add the
 # functions first.
-ALL_TOOLS="gh go node pandoc yt-dlp terraform ffmpeg deno resvg gws gcloud"
+ALL_TOOLS="gh go node pandoc yt-dlp terraform ffmpeg deno resvg gws gcloud bun"
 
 # ------------------------------------------------------------------ casks ---
 # Homebrew casks that stay in brew but are upgraded on MAJOR changes only.

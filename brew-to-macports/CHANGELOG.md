@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `bun` as a vendor tool, installed from the upstream `darwin-x64` zip. Its
+  brew formula compiles through zig and llvm on Intel. The release tag is
+  `bun-v<version>`, and the zip holds `bun-darwin-<arch>/bun`, not a bare
+  binary. The version policy is `always`, because bun stays on 1.x for months
+  and its fixes ship as patches.
+
 ## 0.1.0 — 2026-10-04
 
 First published version, extracted from a complete migration off Homebrew.
